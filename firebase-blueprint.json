@@ -1,0 +1,1157 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile, role, chat pass expiries, and vote/token wallet balance.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated user UID."
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified lowercase Google account email."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown on uploads, chat, friends, and profile."
+        },
+        "bio": {
+          "type": "string",
+          "description": "Optional short creator bio."
+        },
+        "age": {
+          "type": "integer",
+          "description": "Optional public age (18-110) for user discovery filtering."
+        },
+        "sex": {
+          "type": "string",
+          "enum": ["female", "male", "non_binary", "unspecified"],
+          "description": "Optional sex/gender option for user discovery filtering."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "support", "admin"],
+          "description": "Account privilege tier assigned by owner/admin."
+        },
+        "voteBalance": {
+          "type": "integer",
+          "description": "Total available tokens (free starter/bonus tokens plus paid tokens)."
+        },
+        "paidVoteBalance": {
+          "type": "integer",
+          "description": "Purchased tokens only (starts at 0 on signup). Required for creator gallery unlocks (40% creator payout) and live call payouts (70%)."
+        },
+        "totalVotesCast": {
+          "type": "integer",
+          "description": "Lifetime votes cast by this user."
+        },
+        "totalVotesPurchased": {
+          "type": "integer",
+          "description": "Lifetime votes/tokens acquired through paid packs."
+        },
+        "chatAccessExpiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Expiration timestamp for paid 5-day public chat room access passes."
+        },
+        "privateChatAccessExpiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Expiration timestamp for 7-day (1 week) private messaging and private group chat pass (5 tokens/week)."
+        },
+        "phoneTokenBalance": {
+          "type": "integer",
+          "description": "Available purchased phone tokens used for scheduling mic-to-mic conversations (5 tokens/minute)."
+        },
+        "totalPhoneTokensPurchased": {
+          "type": "integer",
+          "description": "Lifetime phone tokens purchased by this user."
+        },
+        "lastRefundedSessionId": {
+          "type": "string",
+          "description": "Session ID of the most recent declined/cancelled mic session refund claimed into phoneTokenBalance."
+        },
+        "supportStartedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when user began active Support staff role (starts 6-month / 180-day eligibility timer for weekly token payroll)."
+        },
+        "lastSupportPayClaimAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the most recent 100-token weekly Support payroll claim."
+        },
+        "totalSupportPayTokensEarned": {
+          "type": "integer",
+          "description": "Lifetime 100-token weekly Support payroll tokens earned after 6 months of Support service."
+        },
+        "referralCode": {
+          "type": "string",
+          "description": "Unique uppercase alphanumeric referral code shared with friends."
+        },
+        "referralCashableBalance": {
+          "type": "integer",
+          "description": "Earned referral reward tokens that can be spent on content creators or cashed in ($0.10/token)."
+        },
+        "totalReferralTokensEarned": {
+          "type": "integer",
+          "description": "Lifetime referral milestone reward tokens earned."
+        },
+        "totalReferralTokensCashedIn": {
+          "type": "integer",
+          "description": "Lifetime referral reward tokens cashed in for cash payouts."
+        },
+        "lastReferralClaimId": {
+          "type": "string",
+          "description": "Claim ID of the most recent 10-referral 100-token milestone reward claimed."
+        },
+        "lastReferralCashoutId": {
+          "type": "string",
+          "description": "Cashout ID of the most recent referral token cash-in request."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was created (starts 7-day free public chat trial)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was last updated."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "voteBalance",
+        "totalVotesCast",
+        "totalVotesPurchased",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CreatorUnlock": {
+      "title": "CreatorUnlock",
+      "description": "Receipt recording that a viewer spent votes to unlock all media from a specific creator.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "votesSpent": { "type": "integer" },
+        "unlockedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "creatorId", "votesSpent", "unlockedAt"]
+    },
+    "VotePurchase": {
+      "title": "VotePurchase",
+      "description": "Ledger record for a vote/token pack purchase.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "packId": { "type": "string" },
+        "packTitle": { "type": "string" },
+        "votesAdded": { "type": "integer" },
+        "priceLabel": { "type": "string" },
+        "purchasedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "packId", "packTitle", "votesAdded", "priceLabel", "purchasedAt"]
+    },
+    "CreatorSummary": {
+      "title": "CreatorSummary",
+      "description": "Public creator showcase & online presence metadata without PII.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "age": { "type": "integer" },
+        "sex": {
+          "type": "string",
+          "enum": ["female", "male", "non_binary", "unspecified"]
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "hidden"]
+        },
+        "postCount": { "type": "integer" },
+        "totalVotesReceived": { "type": "integer" },
+        "freePreviewLimit": { "type": "integer" },
+        "unlockCostVotes": { "type": "integer" },
+        "isOnline": {
+          "type": "boolean",
+          "description": "Real-time online indicator shown in Friends list and discovery."
+        },
+        "lastSeenAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest heartbeat or disconnect."
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "creatorId",
+        "displayName",
+        "visibility",
+        "postCount",
+        "totalVotesReceived",
+        "freePreviewLimit",
+        "unlockCostVotes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MediaPost": {
+      "title": "MediaPost",
+      "description": "A user-uploaded photo or video post with community vote count.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["photo", "video"] },
+        "caption": { "type": "string" },
+        "mediaBase64": { "type": "string" },
+        "mediaDownloadUrl": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "localVideoFileName": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "postIndex": { "type": "integer" },
+        "voteCount": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["public", "hidden"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "creatorId",
+        "creatorName",
+        "mediaType",
+        "caption",
+        "mediaBase64",
+        "durationMs",
+        "postIndex",
+        "voteCount",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PostVoteRecord": {
+      "title": "PostVoteRecord",
+      "description": "Per-user vote tally for a specific post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "voterId": { "type": "string" },
+        "votesCast": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "voterId", "votesCast", "createdAt", "updatedAt"]
+    },
+    "StaffRole": {
+      "title": "StaffRole",
+      "description": "Trusted staff role assignment keyed by lowercase Google email.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayLabel": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "support"] },
+        "active": { "type": "boolean" },
+        "assignedByUid": { "type": "string" },
+        "assignedByEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "active", "assignedByUid", "assignedByEmail", "createdAt", "updatedAt"]
+    },
+    "ContentReport": {
+      "title": "ContentReport",
+      "description": "User-submitted moderation report for a post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "postCreatorId": { "type": "string" },
+        "postCaption": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "resolved", "dismissed"] },
+        "reviewedByUid": { "type": "string" },
+        "resolutionNote": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "postCreatorId", "postCaption", "reporterId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A social chat message inside one of the 5 public community chat rooms.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "enum": ["lounge", "creators_hub", "photo_critique", "video_showcase", "vip_hangout"]
+        },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["user", "support", "admin", "owner"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "senderId", "senderName", "senderRole", "text", "createdAt"]
+    },
+    "ChatRoomState": {
+      "title": "ChatRoomState",
+      "description": "Live room monitor assignment for each public chat room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "enum": ["lounge", "creators_hub", "photo_critique", "video_showcase", "vip_hangout"]
+        },
+        "monitorUid": { "type": "string" },
+        "monitorName": { "type": "string" },
+        "monitorAssignedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "monitorAssignedAt", "updatedAt"]
+    },
+    "ChatPresence": {
+      "title": "ChatPresence",
+      "description": "Active member presence, raise-hand state, speaking status, and monitor voice-mute inside a public chat room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "enum": ["lounge", "creators_hub", "photo_critique", "video_showcase", "vip_hangout"]
+        },
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "support", "admin", "owner"] },
+        "isInvisible": { "type": "boolean" },
+        "handRaised": { "type": "boolean" },
+        "handRaisedAt": { "type": "integer" },
+        "isVoiceMuted": { "type": "boolean" },
+        "voiceMutedByUid": { "type": "string" },
+        "isSpeaking": { "type": "boolean" },
+        "joinedAtMillis": { "type": "integer" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "lastActiveAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "userId", "displayName", "role", "isInvisible", "joinedAt", "lastActiveAt"]
+    },
+    "ChatRoomVoiceChunk": {
+      "title": "ChatRoomVoiceChunk",
+      "description": "Push-to-talk 8kHz Mu-law voice audio packet inside a public chat room.",
+      "type": "object",
+      "properties": {
+        "chunkId": { "type": "string" },
+        "roomId": {
+          "type": "string",
+          "enum": ["lounge", "creators_hub", "photo_critique", "video_showcase", "vip_hangout"]
+        },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "sampleRate": { "type": "integer" },
+        "audioBase64": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "sequenceNumber": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chunkId", "roomId", "senderId", "senderName", "sampleRate", "audioBase64", "durationMs", "sequenceNumber", "createdAt"]
+    },
+    "ChatBounce": {
+      "title": "ChatBounce",
+      "description": "Temporary room kick/bounce cooldown assigned by admin or support.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "enum": ["lounge", "creators_hub", "photo_critique", "video_showcase", "vip_hangout"]
+        },
+        "userId": { "type": "string" },
+        "reason": { "type": "string" },
+        "bouncedByUid": { "type": "string" },
+        "bouncedUntil": { "type": "string", "format": "date-time" },
+        "bouncedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "userId", "reason", "bouncedByUid", "bouncedUntil", "bouncedAt"]
+    },
+    "ChatModerationStatus": {
+      "title": "ChatModerationStatus",
+      "description": "Chat mute, room/chat ban, and full account suspension/ban enforcement state managed by admin and support.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "mutedUntil": { "type": "string", "format": "date-time" },
+        "muteReason": { "type": "string" },
+        "banned": { "type": "boolean" },
+        "banReason": { "type": "string" },
+        "suspendedUntil": { "type": "string", "format": "date-time" },
+        "suspendReason": { "type": "string" },
+        "accountBanned": { "type": "boolean" },
+        "accountBanReason": { "type": "string" },
+        "moderatedByUid": { "type": "string" },
+        "moderatedByEmail": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "banned", "moderatedByUid", "updatedAt"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "User-submitted report against another user for harassment, spam, impersonation, or safety violations.",
+      "type": "object",
+      "properties": {
+        "reportId": { "type": "string" },
+        "reportedUserId": { "type": "string" },
+        "reportedUserName": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "sourceContext": {
+          "type": "string",
+          "enum": ["discover", "profile", "chat_room", "direct_chat", "group_chat", "friends"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "action_taken", "dismissed"]
+        },
+        "reviewedByUid": { "type": "string" },
+        "resolutionNote": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reportId",
+        "reportedUserId",
+        "reportedUserName",
+        "reporterId",
+        "reporterName",
+        "reason",
+        "details",
+        "sourceContext",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "User-submitted support inquiry, billing/token issue, or moderation appeal reviewed by Support and Admin staff.",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["account_appeal", "tokens_billing", "safety_harassment", "mic_calls", "technical_bug", "other"]
+        },
+        "subject": { "type": "string" },
+        "message": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["open", "in_progress", "resolved", "closed"]
+        },
+        "staffReply": { "type": "string" },
+        "respondedByUid": { "type": "string" },
+        "respondedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ticketId",
+        "userId",
+        "userName",
+        "category",
+        "subject",
+        "message",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FriendRelationship": {
+      "title": "FriendRelationship",
+      "description": "Friend request or accepted friendship between two users.",
+      "type": "object",
+      "properties": {
+        "pairId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "receiverName": { "type": "string" },
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "pairId",
+        "senderId",
+        "senderName",
+        "receiverId",
+        "receiverName",
+        "participantIds",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DirectChatThread": {
+      "title": "DirectChatThread",
+      "description": "Private 1-on-1 direct message thread between two users (requires 5 tokens/week pass to send).",
+      "type": "object",
+      "properties": {
+        "threadId": { "type": "string" },
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "participantNames": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "lastMessageText": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "participantIds", "participantNames", "lastMessageText", "createdAt", "updatedAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Private 1-on-1 text message or snap photo inside a direct chat thread.",
+      "type": "object",
+      "properties": {
+        "threadId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["text", "snap"] },
+        "snapBase64": { "type": "string" },
+        "snapDownloadUrl": { "type": "string" },
+        "snapStoragePath": { "type": "string" },
+        "snapDurationSeconds": { "type": "integer" },
+        "viewedByIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "senderId", "senderName", "text", "createdAt"]
+    },
+    "PrivateGroupChat": {
+      "title": "PrivateGroupChat",
+      "description": "User-created private group chat with configurable privacy settings (requires 5 tokens/week pass).",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "memberIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "memberNames": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "privacyMode": {
+          "type": "string",
+          "enum": ["invite_only", "friends_can_invite"]
+        },
+        "allowMemberInvites": { "type": "boolean" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "groupId",
+        "name",
+        "description",
+        "ownerId",
+        "memberIds",
+        "memberNames",
+        "privacyMode",
+        "allowMemberInvites",
+        "lastMessageText",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GroupChatMessage": {
+      "title": "GroupChatMessage",
+      "description": "Message inside a private group chat.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "senderId", "senderName", "text", "createdAt"]
+    },
+    "PhoneTokenPurchase": {
+      "title": "PhoneTokenPurchase",
+      "description": "Ledger record for a purchased phone token pack used for mic-to-mic calls.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "packId": { "type": "string" },
+        "packTitle": { "type": "string" },
+        "tokensAdded": { "type": "integer" },
+        "priceLabel": { "type": "string" },
+        "purchasedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "packId", "packTitle", "tokensAdded", "priceLabel", "purchasedAt"]
+    },
+    "CreatorPayout": {
+      "title": "CreatorPayout",
+      "description": "Creator revenue share earnings record (40% on creator gallery content unlocks, 70% on mic/video calls).",
+      "type": "object",
+      "properties": {
+        "payoutId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "payerId": { "type": "string" },
+        "payerName": { "type": "string" },
+        "sourceType": { "type": "string", "enum": ["gallery_unlock", "mic_call", "video_call"] },
+        "sourceId": { "type": "string" },
+        "grossTokens": { "type": "integer" },
+        "creatorSharePercent": { "type": "integer" },
+        "creatorShareCents": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "payoutId",
+        "creatorId",
+        "payerId",
+        "payerName",
+        "sourceType",
+        "sourceId",
+        "grossTokens",
+        "creatorSharePercent",
+        "creatorShareCents",
+        "createdAt"
+      ]
+    },
+    "MicSession": {
+      "title": "MicSession",
+      "description": "Scheduled 1-on-1 mic-to-mic voice conversation (5 phone tokens/min, 70% credited to creator upon acceptance).",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "requesterId": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "participantIds": { "type": "array", "items": { "type": "string" } },
+        "topic": { "type": "string" },
+        "scheduledForMillis": { "type": "integer" },
+        "durationMinutes": { "type": "integer" },
+        "tokensPerMinute": { "type": "integer" },
+        "totalTokensCost": { "type": "integer" },
+        "creatorShareTokens": { "type": "integer" },
+        "creatorShareCents": { "type": "integer" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "active", "completed", "declined", "cancelled"]
+        },
+        "escrowStatus": {
+          "type": "string",
+          "enum": ["held", "released", "refund_pending", "refunded"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "sessionId",
+        "requesterId",
+        "requesterName",
+        "creatorId",
+        "creatorName",
+        "participantIds",
+        "topic",
+        "scheduledForMillis",
+        "durationMinutes",
+        "tokensPerMinute",
+        "totalTokensCost",
+        "creatorShareTokens",
+        "creatorShareCents",
+        "status",
+        "escrowStatus",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MicAudioChunk": {
+      "title": "MicAudioChunk",
+      "description": "Real-time Mu-law compressed microphone voice chunk exchanged during an accepted/active mic-to-mic call.",
+      "type": "object",
+      "properties": {
+        "chunkId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "sampleRate": { "type": "integer" },
+        "audioBase64": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "sequenceNumber": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "chunkId",
+        "sessionId",
+        "senderId",
+        "senderName",
+        "sampleRate",
+        "audioBase64",
+        "durationMs",
+        "sequenceNumber",
+        "createdAt"
+      ]
+    },
+    "SupportPayrollPayout": {
+      "title": "SupportPayrollPayout",
+      "description": "Weekly 100-token stipend payout ledger for Support staff members with 6+ months (180+ days) of service.",
+      "type": "object",
+      "properties": {
+        "payoutId": { "type": "string" },
+        "staffUserId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "staffEmail": { "type": "string" },
+        "tokensAwarded": { "type": "integer" },
+        "usdValueCents": { "type": "integer" },
+        "weekLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "payoutId",
+        "staffUserId",
+        "staffName",
+        "tokensAwarded",
+        "usdValueCents",
+        "weekLabel",
+        "createdAt"
+      ]
+    },
+    "BanRequest": {
+      "title": "BanRequest",
+      "description": "Ban approval request created when Support suspends a user and escalates a ban decision to Admins.",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "requestedByUid": { "type": "string" },
+        "requestedByName": { "type": "string" },
+        "requestedByEmail": { "type": "string" },
+        "banScope": { "type": "string", "enum": ["account", "chat"] },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "reviewedByUid": { "type": "string" },
+        "reviewedByName": { "type": "string" },
+        "reviewNote": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "requestId",
+        "targetUserId",
+        "targetUserName",
+        "requestedByUid",
+        "requestedByName",
+        "banScope",
+        "reason",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ReferralCodeDirectoryEntry": {
+      "title": "ReferralCodeDirectoryEntry",
+      "description": "Unique uppercase referral code lookup entry mapping a code to its owner UID.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "ownerId", "ownerName", "createdAt"]
+    },
+    "ReferralRecord": {
+      "title": "ReferralRecord",
+      "description": "Tracks a referred user, qualifying token purchase, and 10-referral reward claim status.",
+      "type": "object",
+      "properties": {
+        "referredUserId": { "type": "string" },
+        "referredUserName": { "type": "string" },
+        "referrerId": { "type": "string" },
+        "referrerName": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "qualified"] },
+        "qualifyingPurchaseType": { "type": "string", "enum": ["vote_pack", "phone_pack", "video_pack"] },
+        "qualifyingPurchaseId": { "type": "string" },
+        "rewardClaimed": { "type": "boolean" },
+        "rewardClaimId": { "type": "string" },
+        "qualifiedAt": { "type": "string", "format": "date-time" },
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "referredUserId",
+        "referredUserName",
+        "referrerId",
+        "referrerName",
+        "referralCode",
+        "status",
+        "rewardClaimed",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ReferralClaim": {
+      "title": "ReferralClaim",
+      "description": "Receipt when a referrer claims 100 tokens usable on creators or cash-in after 10 paying referrals.",
+      "type": "object",
+      "properties": {
+        "claimId": { "type": "string" },
+        "referrerId": { "type": "string" },
+        "referrerName": { "type": "string" },
+        "qualifiedReferralIds": { "type": "array", "items": { "type": "string" } },
+        "referralCountRequired": { "type": "integer" },
+        "tokensAwarded": { "type": "integer" },
+        "cashValueCents": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "claimId",
+        "referrerId",
+        "referrerName",
+        "qualifiedReferralIds",
+        "referralCountRequired",
+        "tokensAwarded",
+        "cashValueCents",
+        "createdAt"
+      ]
+    },
+    "ReferralCashout": {
+      "title": "ReferralCashout",
+      "description": "Cash-in payout request converting earned referral tokens at $0.10 per token.",
+      "type": "object",
+      "properties": {
+        "cashoutId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "tokensCashedIn": { "type": "integer" },
+        "usdCents": { "type": "integer" },
+        "payoutMethod": { "type": "string", "enum": ["instant_payout", "paypal", "bank_ach"] },
+        "payoutDestination": { "type": "string" },
+        "status": { "type": "string", "enum": ["submitted", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "cashoutId",
+        "userId",
+        "userName",
+        "tokensCashedIn",
+        "usdCents",
+        "payoutMethod",
+        "payoutDestination",
+        "status",
+        "createdAt"
+      ]
+    },
+    "UserStory": {
+      "title": "UserStory",
+      "description": "24-hour user story containing either a snap photo or a stylized text message.",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "storyType": { "type": "string", "enum": ["photo", "message"] },
+        "text": { "type": "string" },
+        "mediaBase64": { "type": "string" },
+        "mediaDownloadUrl": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "backgroundStyle": { "type": "string" },
+        "viewCount": { "type": "integer" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "storyId",
+        "userId",
+        "userName",
+        "storyType",
+        "text",
+        "backgroundStyle",
+        "viewCount",
+        "expiresAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserCheckIn": {
+      "title": "UserCheckIn",
+      "description": "Optional user status check-in badge with place label, vibe tag, and note (no GPS permission required).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "placeLabel": { "type": "string" },
+        "statusNote": { "type": "string" },
+        "vibeTag": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "placeLabel",
+        "statusNote",
+        "vibeTag",
+        "expiresAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminAnnouncement": {
+      "title": "AdminAnnouncement",
+      "description": "Global admin alert or news popup broadcast to all users.",
+      "type": "object",
+      "properties": {
+        "announcementId": { "type": "string" },
+        "category": { "type": "string", "enum": ["alert", "news"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["owner", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "announcementId",
+        "category",
+        "title",
+        "message",
+        "senderId",
+        "senderName",
+        "senderRole",
+        "createdAt"
+      ]
+    },
+    "UserWarning": {
+      "title": "UserWarning",
+      "description": "Targeted popup warning sent by Admin or Support staff to a specific user.",
+      "type": "object",
+      "properties": {
+        "warningId": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["owner", "admin", "support"] },
+        "severity": { "type": "string", "enum": ["reminder", "warning", "final_warning"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "acknowledged": { "type": "boolean" },
+        "acknowledgedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "warningId",
+        "targetUserId",
+        "targetUserName",
+        "senderId",
+        "senderName",
+        "senderRole",
+        "severity",
+        "title",
+        "message",
+        "acknowledged",
+        "createdAt"
+      ]
+    },
+    "BlockedUser": {
+      "title": "BlockedUser",
+      "description": "Account blocked by a user to restrict messaging, discovery, and content visibility.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "blockedUserId": { "type": "string" },
+        "blockedUserName": { "type": "string" },
+        "reason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "blockedUserId",
+        "blockedUserName",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile, role, chat access passes, and vote/token balance wallet."
+    },
+    "/users/{userId}/unlocks/{creatorId}": {
+      "schema": { "$ref": "#/entities/CreatorUnlock" },
+      "description": "Creators unlocked by this user using votes."
+    },
+    "/users/{userId}/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/VotePurchase" },
+      "description": "Vote/token pack purchase history for this user."
+    },
+    "/users/{userId}/blocked_users/{blockedUserId}": {
+      "schema": { "$ref": "#/entities/BlockedUser" },
+      "description": "Accounts blocked/restricted by this user."
+    },
+    "/creators/{creatorId}": {
+      "schema": { "$ref": "#/entities/CreatorSummary" },
+      "description": "Public creator showcase & online presence directory."
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/MediaPost" },
+      "description": "Public community photo and video posts."
+    },
+    "/posts/{postId}/votes/{voterId}": {
+      "schema": { "$ref": "#/entities/PostVoteRecord" },
+      "description": "Votes cast by a user on a specific post."
+    },
+    "/staff_roles/{staffEmail}": {
+      "schema": { "$ref": "#/entities/StaffRole" },
+      "description": "Admin and support staff role assignments keyed by lowercase email."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ContentReport" },
+      "description": "Community moderation reports reviewed by support and admin staff."
+    },
+    "/chat_moderation/{userId}": {
+      "schema": { "$ref": "#/entities/ChatModerationStatus" },
+      "description": "Mute and ban status enforced across chat rooms."
+    },
+    "/chat_rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/ChatRoomState" },
+      "description": "Live room monitor assignment and auto-handover metadata."
+    },
+    "/chat_rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages posted inside each of the 5 public chat rooms."
+    },
+    "/chat_rooms/{roomId}/presence/{userId}": {
+      "schema": { "$ref": "#/entities/ChatPresence" },
+      "description": "Visible active members, raise-hand queue, and room voice-mute state."
+    },
+    "/chat_rooms/{roomId}/voice_chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/ChatRoomVoiceChunk" },
+      "description": "Push-to-talk audio packets broadcast inside a public chat room."
+    },
+    "/chat_rooms/{roomId}/bounces/{userId}": {
+      "schema": { "$ref": "#/entities/ChatBounce" },
+      "description": "Temporary room bounce/kick cooldowns enforced by room monitors or staff."
+    },
+    "/friend_requests/{pairId}": {
+      "schema": { "$ref": "#/entities/FriendRelationship" },
+      "description": "Friend requests and confirmed friendships between users."
+    },
+    "/direct_chats/{threadId}": {
+      "schema": { "$ref": "#/entities/DirectChatThread" },
+      "description": "Private 1-on-1 message threads."
+    },
+    "/direct_chats/{threadId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Messages inside private 1-on-1 threads."
+    },
+    "/group_chats/{groupId}": {
+      "schema": { "$ref": "#/entities/PrivateGroupChat" },
+      "description": "Private group chats with member & privacy settings."
+    },
+    "/group_chats/{groupId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/GroupChatMessage" },
+      "description": "Messages inside private group chats."
+    },
+    "/users/{userId}/phone_purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/PhoneTokenPurchase" },
+      "description": "Phone token pack purchases for mic-to-mic voice sessions."
+    },
+    "/creator_payouts/{payoutId}": {
+      "schema": { "$ref": "#/entities/CreatorPayout" },
+      "description": "Creator revenue share payouts (40% on gallery unlocks, 70% on mic/video sessions)."
+    },
+    "/mic_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/MicSession" },
+      "description": "Scheduled 1-on-1 mic-to-mic conversations (5 phone tokens/min, 70% creator cut)."
+    },
+    "/mic_sessions/{sessionId}/audio_chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/MicAudioChunk" },
+      "description": "Live duplex microphone voice packets for an active mic-to-mic session."
+    },
+    "/user_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/UserReport" },
+      "description": "User-submitted safety/behavior reports against other users, reviewed by Support and Admin staff."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "User support tickets and moderation appeals handled by Support and Admin staff."
+    },
+    "/support_payroll/{payoutId}": {
+      "schema": { "$ref": "#/entities/SupportPayrollPayout" },
+      "description": "Weekly 100-token stipend claims for Support staff after 6 months of tenure."
+    },
+    "/ban_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/BanRequest" },
+      "description": "Support-submitted ban requests awaiting Admin approval while the target user is suspended."
+    },
+    "/referral_codes/{code}": {
+      "schema": { "$ref": "#/entities/ReferralCodeDirectoryEntry" },
+      "description": "Public directory mapping unique referral codes to referrer user IDs."
+    },
+    "/referrals/{referredUserId}": {
+      "schema": { "$ref": "#/entities/ReferralRecord" },
+      "description": "Referral attribution records keyed by referredUserId (1 referrer per user)."
+    },
+    "/referral_claims/{claimId}": {
+      "schema": { "$ref": "#/entities/ReferralClaim" },
+      "description": "Atomic 10-referral -> 100-token reward claim receipts."
+    },
+    "/referral_cashouts/{cashoutId}": {
+      "schema": { "$ref": "#/entities/ReferralCashout" },
+      "description": "Cash-in requests for eligible earned referral tokens ($0.10 per token)."
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/UserStory" },
+      "description": "24-hour photo snap and stylized message stories."
+    },
+    "/check_ins/{userId}": {
+      "schema": { "$ref": "#/entities/UserCheckIn" },
+      "description": "Optional user status check-ins displayed in Discover."
+    },
+    "/admin_announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/AdminAnnouncement" },
+      "description": "Admin-broadcasted global alerts and news popups for all users."
+    },
+    "/user_warnings/{warningId}": {
+      "schema": { "$ref": "#/entities/UserWarning" },
+      "description": "Popup warnings sent by Admin or Support staff directly to a user."
+    }
+  }
+}

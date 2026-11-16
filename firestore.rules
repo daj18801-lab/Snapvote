@@ -1,0 +1,2270 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything unless explicitly matched and allowed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL PRIMITIVES ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidStaffEmailId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 128 && id.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+    }
+
+    function isValidRoomId(roomId) {
+      return roomId in ['lounge', 'creators_hub', 'photo_critique', 'video_showcase', 'vip_hangout'];
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasVerifiedEmail() {
+      return isSignedIn() &&
+             ('email_verified' in request.auth.token) &&
+             request.auth.token.email_verified == true &&
+             ('email' in request.auth.token) &&
+             request.auth.token.email is string;
+    }
+
+    function isBootstrappedOwner() {
+      return hasVerifiedEmail() &&
+             request.auth.token.email.lower() == 'daj18801@gmail.com';
+    }
+
+    function hasStaffDocRole(roles) {
+      return hasVerifiedEmail() &&
+             exists(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())) &&
+             get(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())).data.active == true &&
+             get(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())).data.role in roles;
+    }
+
+    function hasUserDocRole(roles) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             ('role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
+    }
+
+    function isAdmin() {
+      return isBootstrappedOwner() || hasStaffDocRole(['admin']) || hasUserDocRole(['admin']);
+    }
+
+    function isSupportOrAdmin() {
+      return isBootstrappedOwner() || hasStaffDocRole(['admin', 'support']) || hasUserDocRole(['admin', 'support']);
+    }
+
+    function isStaffAllowedSenderRole(senderRole) {
+      return (senderRole == 'owner' && isBootstrappedOwner()) ||
+             (senderRole == 'admin' && isAdmin()) ||
+             (senderRole == 'support' && isSupportOrAdmin()) ||
+             (senderRole == 'user' && isSupportOrAdmin());
+    }
+
+    function isTargetProtectedOwner(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+             ('email' in get(/databases/$(database)/documents/users/$(userId)).data) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.email == 'daj18801@gmail.com';
+    }
+
+    function isTargetAdmin(userId) {
+      return isTargetProtectedOwner(userId) || (
+        exists(/databases/$(database)/documents/users/$(userId)) &&
+        ('role' in get(/databases/$(database)/documents/users/$(userId)).data) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.role == 'admin'
+      );
+    }
+
+    function isTargetStaff(userId) {
+      return isTargetProtectedOwner(userId) || (
+        exists(/databases/$(database)/documents/users/$(userId)) &&
+        ('role' in get(/databases/$(database)/documents/users/$(userId)).data) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.role in ['admin', 'support']
+      );
+    }
+
+    function isRoomMonitor(roomId) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/chat_rooms/$(roomId)) &&
+             get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.monitorUid == request.auth.uid &&
+             exists(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data.isInvisible == false;
+    }
+
+    function isChatBanned() {
+      return exists(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.banned == true;
+    }
+
+    function isChatMuted() {
+      return exists(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)) &&
+             ('mutedUntil' in get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data) &&
+             get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.mutedUntil is timestamp &&
+             request.time < get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.mutedUntil;
+    }
+
+    function isBouncedFromRoom(roomId) {
+      return exists(/databases/$(database)/documents/chat_rooms/$(roomId)/bounces/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/chat_rooms/$(roomId)/bounces/$(request.auth.uid)).data.bouncedUntil is timestamp &&
+             request.time < get(/databases/$(database)/documents/chat_rooms/$(roomId)/bounces/$(request.auth.uid)).data.bouncedUntil;
+    }
+
+    function hasPaidOrTrialChatAccess() {
+      return isSignedIn();
+    }
+
+    function hasPrivateChatAccess() {
+      return isSignedIn();
+    }
+
+    function isAccountRestricted() {
+      return !isSupportOrAdmin() &&
+             exists(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)) && (
+               (('accountBanned' in get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data) &&
+                get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.accountBanned == true) ||
+               (('suspendedUntil' in get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data) &&
+                get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.suspendedUntil is timestamp &&
+                request.time < get(/databases/$(database)/documents/chat_moderation/$(request.auth.uid)).data.suspendedUntil)
+             );
+    }
+
+    function canReadChatRoom(roomId) {
+      return isSupportOrAdmin() ||
+             (!isAccountRestricted() && !isChatBanned() && !isBouncedFromRoom(roomId) && hasPaidOrTrialChatAccess());
+    }
+
+    function isDirectChatParticipant(threadId) {
+      return exists(/databases/$(database)/documents/direct_chats/$(threadId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/direct_chats/$(threadId)).data.participantIds;
+    }
+
+    function isGroupChatMember(groupId) {
+      return exists(/databases/$(database)/documents/group_chats/$(groupId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/group_chats/$(groupId)).data.memberIds;
+    }
+
+    // --- VALIDATION BLUEPRINTS ---
+    function isValidUserProfile(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 128)) &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('bio' in data) || data.bio == null || (data.bio is string && data.bio.size() <= 240)) &&
+             (!('age' in data) || data.age == null || (data.age is int && data.age >= 18 && data.age <= 110)) &&
+             (!('sex' in data) || data.sex == null || data.sex in ['female', 'male', 'non_binary', 'unspecified']) &&
+             (!('role' in data) || data.role in ['user', 'support', 'admin']) &&
+             data.voteBalance is int &&
+             data.voteBalance >= 0 && data.voteBalance <= 1000000 &&
+             (!('paidVoteBalance' in data) || (data.paidVoteBalance is int && data.paidVoteBalance >= 0 && data.paidVoteBalance <= 1000000 && data.paidVoteBalance <= data.voteBalance)) &&
+             data.totalVotesCast is int &&
+             data.totalVotesCast >= 0 && data.totalVotesCast <= 1000000 &&
+             data.totalVotesPurchased is int &&
+             data.totalVotesPurchased >= 0 && data.totalVotesPurchased <= 1000000 &&
+             (!('chatAccessExpiresAt' in data) || data.chatAccessExpiresAt == null || data.chatAccessExpiresAt is timestamp) &&
+             (!('privateChatAccessExpiresAt' in data) || data.privateChatAccessExpiresAt == null || data.privateChatAccessExpiresAt is timestamp) &&
+             (!('phoneTokenBalance' in data) || (data.phoneTokenBalance is int && data.phoneTokenBalance >= 0 && data.phoneTokenBalance <= 1000000)) &&
+             (!('totalPhoneTokensPurchased' in data) || (data.totalPhoneTokensPurchased is int && data.totalPhoneTokensPurchased >= 0 && data.totalPhoneTokensPurchased <= 1000000)) &&
+             (!('lastRefundedSessionId' in data) || data.lastRefundedSessionId == null || (data.lastRefundedSessionId is string && data.lastRefundedSessionId.size() <= 128)) &&
+             (!('videoTokenBalance' in data) || (data.videoTokenBalance is int && data.videoTokenBalance >= 0 && data.videoTokenBalance <= 1000000)) &&
+             (!('totalVideoTokensPurchased' in data) || (data.totalVideoTokensPurchased is int && data.totalVideoTokensPurchased >= 0 && data.totalVideoTokensPurchased <= 10000000)) &&
+             (!('lastRefundedVideoSessionId' in data) || data.lastRefundedVideoSessionId == null || (data.lastRefundedVideoSessionId is string && data.lastRefundedVideoSessionId.size() <= 128)) &&
+             (!('supportStartedAt' in data) || data.supportStartedAt == null || data.supportStartedAt is timestamp) &&
+             (!('lastSupportPayClaimAt' in data) || data.lastSupportPayClaimAt == null || data.lastSupportPayClaimAt is timestamp) &&
+             (!('totalSupportPayTokensEarned' in data) || (data.totalSupportPayTokensEarned is int && data.totalSupportPayTokensEarned >= 0 && data.totalSupportPayTokensEarned <= 10000000)) &&
+             (!('referralCode' in data) || data.referralCode == null || isValidReferralCode(data.referralCode)) &&
+             (!('referralCashableBalance' in data) || (data.referralCashableBalance is int && data.referralCashableBalance >= 0 && data.referralCashableBalance <= 1000000 && data.referralCashableBalance <= (('paidVoteBalance' in data && data.paidVoteBalance is int) ? data.paidVoteBalance : 0))) &&
+             (!('totalReferralTokensEarned' in data) || (data.totalReferralTokensEarned is int && data.totalReferralTokensEarned >= 0 && data.totalReferralTokensEarned <= 10000000)) &&
+             (!('totalReferralTokensCashedIn' in data) || (data.totalReferralTokensCashedIn is int && data.totalReferralTokensCashedIn >= 0 && data.totalReferralTokensCashedIn <= 10000000)) &&
+             (!('lastReferralClaimId' in data) || data.lastReferralClaimId == null || (data.lastReferralClaimId is string && data.lastReferralClaimId.size() <= 128)) &&
+             (!('lastReferralCashoutId' in data) || data.lastReferralCashoutId == null || (data.lastReferralCashoutId is string && data.lastReferralCashoutId.size() <= 128)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidReferralCode(code) {
+      return code is string && code.size() >= 6 && code.size() <= 16 && code.matches('^[A-Z0-9]{6,16}$');
+    }
+
+    function existingPaidVoteBalance() {
+      return existing().get('paidVoteBalance', 0);
+    }
+
+    function incomingPaidVoteBalance() {
+      return incoming().get('paidVoteBalance', 0);
+    }
+
+    function existingReferralCashableBalance() {
+      return existing().get('referralCashableBalance', 0);
+    }
+
+    function incomingReferralCashableBalance() {
+      return incoming().get('referralCashableBalance', 0);
+    }
+
+    function isValidTokenSpendBalances(cost) {
+      return incoming().voteBalance == existing().voteBalance - cost &&
+             ((existing().voteBalance - existing().get('paidVoteBalance', 0) >= cost &&
+               incoming().get('paidVoteBalance', 0) == existing().get('paidVoteBalance', 0)) ||
+              (existing().voteBalance - existing().get('paidVoteBalance', 0) < cost &&
+               incoming().get('paidVoteBalance', 0) == incoming().voteBalance)) &&
+             incoming().get('referralCashableBalance', 0) ==
+               (existing().get('referralCashableBalance', 0) <= incoming().get('paidVoteBalance', 0)
+                 ? existing().get('referralCashableBalance', 0)
+                 : incoming().get('paidVoteBalance', 0));
+    }
+
+    function existingTotalReferralTokensEarned() {
+      return existing().get('totalReferralTokensEarned', 0);
+    }
+
+    function existingTotalReferralTokensCashedIn() {
+      return existing().get('totalReferralTokensCashedIn', 0);
+    }
+
+    function existingPhoneBalance() {
+      return existing().get('phoneTokenBalance', 0);
+    }
+
+    function existingTotalPhonePurchased() {
+      return existing().get('totalPhoneTokensPurchased', 0);
+    }
+
+    function existingTotalSupportPayEarned() {
+      return existing().get('totalSupportPayTokensEarned', 0);
+    }
+
+    function hasSixMonthSupportTenure() {
+      return (
+        (('role' in existing()) && existing().role == 'support' &&
+         ('supportStartedAt' in existing()) && existing().supportStartedAt is timestamp &&
+         request.time >= existing().supportStartedAt + duration.value(180, 'd')) ||
+        (hasVerifiedEmail() &&
+         exists(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())) &&
+         get(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())).data.role == 'support' &&
+         get(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())).data.active == true && (
+           (('supportStartedAt' in existing()) && existing().supportStartedAt is timestamp &&
+            request.time >= existing().supportStartedAt + duration.value(180, 'd')) ||
+           (!('supportStartedAt' in existing()) &&
+            request.time >= get(/databases/$(database)/documents/staff_roles/$(request.auth.token.email.lower())).data.createdAt + duration.value(180, 'd'))
+         ))
+      );
+    }
+
+    function hasSupportWeeklyCooldownElapsed() {
+      return !('lastSupportPayClaimAt' in existing()) ||
+             existing().lastSupportPayClaimAt == null ||
+             request.time >= existing().lastSupportPayClaimAt + duration.value(7, 'd');
+    }
+
+    function isMicSessionParticipant(sessionId) {
+      return exists(/databases/$(database)/documents/mic_sessions/$(sessionId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/mic_sessions/$(sessionId)).data.participantIds;
+    }
+
+    function isMicSessionCallable(sessionId) {
+      return exists(/databases/$(database)/documents/mic_sessions/$(sessionId)) &&
+             get(/databases/$(database)/documents/mic_sessions/$(sessionId)).data.status in ['accepted', 'active'];
+    }
+
+    function existingVideoBalance() {
+      return existing().get('videoTokenBalance', 0);
+    }
+
+    function existingTotalVideoPurchased() {
+      return existing().get('totalVideoTokensPurchased', 0);
+    }
+
+    function isVideoSessionParticipant(sessionId) {
+      return exists(/databases/$(database)/documents/video_sessions/$(sessionId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/video_sessions/$(sessionId)).data.participantIds;
+    }
+
+    function isVideoSessionCallable(sessionId) {
+      return exists(/databases/$(database)/documents/video_sessions/$(sessionId)) &&
+             get(/databases/$(database)/documents/video_sessions/$(sessionId)).data.status in ['accepted', 'active'];
+    }
+
+    function isSelfUserTokenActionAllowed(data, prev, changed) {
+      return (
+        // Action: Claim 10-referral milestone (+100 tokens usable on content creators OR cashable)
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'totalReferralTokensEarned', 'lastReferralClaimId', 'updatedAt']) &&
+         data.voteBalance == prev.voteBalance + 100 &&
+         data.voteBalance <= 1000000 &&
+         data.paidVoteBalance == prev.get('paidVoteBalance', 0) + 100 &&
+         data.referralCashableBalance == prev.get('referralCashableBalance', 0) + 100 &&
+         data.totalReferralTokensEarned == prev.get('totalReferralTokensEarned', 0) + 100 &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         isValidId(data.lastReferralClaimId) &&
+         !exists(/databases/$(database)/documents/referral_claims/$(data.lastReferralClaimId)) &&
+         getAfter(/databases/$(database)/documents/referral_claims/$(data.lastReferralClaimId)).data.referrerId == request.auth.uid) ||
+        // Action: Cash in earned referral tokens ($0.10/token) atomically with /referral_cashouts/{cashoutId}
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'totalReferralTokensCashedIn', 'lastReferralCashoutId', 'updatedAt']) &&
+         data.lastReferralCashoutId is string &&
+         isValidId(data.lastReferralCashoutId) &&
+         data.referralCashableBalance is int &&
+         data.referralCashableBalance >= 0 &&
+         data.referralCashableBalance < prev.get('referralCashableBalance', 0) &&
+         data.paidVoteBalance is int &&
+         data.paidVoteBalance >= 0 &&
+         data.paidVoteBalance == prev.get('paidVoteBalance', 0) - (prev.get('referralCashableBalance', 0) - data.referralCashableBalance) &&
+         data.voteBalance >= 0 &&
+         data.voteBalance == prev.voteBalance - (prev.get('referralCashableBalance', 0) - data.referralCashableBalance) &&
+         data.totalReferralTokensCashedIn == prev.get('totalReferralTokensCashedIn', 0) + (prev.get('referralCashableBalance', 0) - data.referralCashableBalance) &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         !exists(/databases/$(database)/documents/referral_cashouts/$(data.lastReferralCashoutId)) &&
+         getAfter(/databases/$(database)/documents/referral_cashouts/$(data.lastReferralCashoutId)).data.userId == request.auth.uid &&
+         getAfter(/databases/$(database)/documents/referral_cashouts/$(data.lastReferralCashoutId)).data.tokensCashedIn == (prev.get('referralCashableBalance', 0) - data.referralCashableBalance)) ||
+        // Action: Spend PAID tokens (purchased or referral-earned) to unlock a creator gallery
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'updatedAt']) &&
+         data.voteBalance is int &&
+         data.voteBalance >= 0 &&
+         data.voteBalance < prev.voteBalance &&
+         (prev.voteBalance - data.voteBalance) <= 25 &&
+         data.paidVoteBalance is int &&
+         data.paidVoteBalance >= 0 &&
+         data.paidVoteBalance <= data.voteBalance &&
+         data.paidVoteBalance < prev.get('paidVoteBalance', 0) &&
+         (prev.get('paidVoteBalance', 0) - data.paidVoteBalance) == (prev.voteBalance - data.voteBalance) &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         data.get('referralCashableBalance', 0) >= 0 &&
+         data.get('referralCashableBalance', 0) ==
+           (prev.get('referralCashableBalance', 0) <= data.paidVoteBalance
+             ? prev.get('referralCashableBalance', 0)
+             : data.paidVoteBalance)) ||
+        // Action: Purchase votes/tokens (credits both total voteBalance and paidVoteBalance)
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'totalVotesPurchased', 'updatedAt']) &&
+         data.voteBalance is int &&
+         data.voteBalance > prev.voteBalance &&
+         data.voteBalance <= 1000000 &&
+         (data.voteBalance - prev.voteBalance) <= 1000 &&
+         data.paidVoteBalance is int &&
+         data.paidVoteBalance == prev.get('paidVoteBalance', 0) + (data.voteBalance - prev.voteBalance) &&
+         (data.totalVotesPurchased - prev.totalVotesPurchased) == (data.voteBalance - prev.voteBalance) &&
+         data.totalVotesPurchased <= 1000000 &&
+         data.totalVotesCast == prev.totalVotesCast) ||
+        // Action: Spend 1 vote to vote on a post
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'totalVotesCast', 'updatedAt']) &&
+         prev.voteBalance >= 1 &&
+         data.totalVotesCast == prev.totalVotesCast + 1 &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         isValidTokenSpendBalances(1)) ||
+        // Action: Spend 5 vote coins for 5 days of public chat room access
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'chatAccessExpiresAt', 'updatedAt']) &&
+         prev.voteBalance >= 5 &&
+         isValidTokenSpendBalances(5) &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         data.chatAccessExpiresAt is timestamp &&
+         data.chatAccessExpiresAt > request.time &&
+         ((!('chatAccessExpiresAt' in prev) || prev.chatAccessExpiresAt == null || prev.chatAccessExpiresAt <= request.time)
+           ? data.chatAccessExpiresAt <= request.time + duration.value(5, 'd') + duration.value(5, 'm')
+           : data.chatAccessExpiresAt <= prev.chatAccessExpiresAt + duration.value(5, 'd') + duration.value(5, 'm'))) ||
+        // Action: Spend 5 tokens for 7 days of private messages & private group chats
+        (changed.hasOnly(['voteBalance', 'paidVoteBalance', 'referralCashableBalance', 'privateChatAccessExpiresAt', 'updatedAt']) &&
+         prev.voteBalance >= 5 &&
+         isValidTokenSpendBalances(5) &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         data.privateChatAccessExpiresAt is timestamp &&
+         data.privateChatAccessExpiresAt > request.time &&
+         ((!('privateChatAccessExpiresAt' in prev) || prev.privateChatAccessExpiresAt == null || prev.privateChatAccessExpiresAt <= request.time)
+           ? data.privateChatAccessExpiresAt <= request.time + duration.value(7, 'd') + duration.value(5, 'm')
+           : data.privateChatAccessExpiresAt <= prev.privateChatAccessExpiresAt + duration.value(7, 'd') + duration.value(5, 'm')))
+      );
+    }
+
+    function isSelfUserCommsOrProfileActionAllowed(data, prev, changed) {
+      return (
+        // Action: Edit profile metadata & discovery fields
+        (changed.hasOnly(['displayName', 'bio', 'age', 'sex', 'email', 'updatedAt']) &&
+         isValidUserProfile(data) &&
+         (!('email' in data) || data.email == null ||
+          (('email' in prev) && data.email == prev.email) ||
+          ((!('email' in prev) || prev.email == null) && hasVerifiedEmail() && data.email == request.auth.token.email.lower()))) ||
+        // Action: Backfill unique referralCode once if unset on legacy profile
+        (changed.hasOnly(['referralCode', 'updatedAt']) &&
+         (!('referralCode' in prev) || prev.referralCode == null || prev.referralCode == '') &&
+         isValidReferralCode(data.referralCode)) ||
+        // Action: Buy phone tokens for mic-to-mic scheduled conversations
+        (changed.hasOnly(['phoneTokenBalance', 'totalPhoneTokensPurchased', 'updatedAt']) &&
+         data.phoneTokenBalance is int &&
+         data.totalPhoneTokensPurchased is int &&
+         data.phoneTokenBalance > prev.get('phoneTokenBalance', 0) &&
+         data.phoneTokenBalance <= 1000000 &&
+         (data.phoneTokenBalance - prev.get('phoneTokenBalance', 0)) <= 1000 &&
+         (data.totalPhoneTokensPurchased - prev.get('totalPhoneTokensPurchased', 0)) == (data.phoneTokenBalance - prev.get('phoneTokenBalance', 0)) &&
+         data.totalPhoneTokensPurchased <= 1000000) ||
+        // Action: Spend phone tokens (multiple of 5) to schedule a mic-to-mic conversation
+        (changed.hasOnly(['phoneTokenBalance', 'updatedAt']) &&
+         data.phoneTokenBalance is int &&
+         data.phoneTokenBalance >= 0 &&
+         data.phoneTokenBalance < prev.get('phoneTokenBalance', 0) &&
+         ((prev.get('phoneTokenBalance', 0) - data.phoneTokenBalance) % 5 == 0) &&
+         (prev.get('phoneTokenBalance', 0) - data.phoneTokenBalance) <= 600) ||
+        // Action: Claim atomic 100% phone token refund from a declined/cancelled mic session
+        (changed.hasOnly(['phoneTokenBalance', 'lastRefundedSessionId', 'updatedAt']) &&
+         data.lastRefundedSessionId is string &&
+         isValidId(data.lastRefundedSessionId) &&
+         exists(/databases/$(database)/documents/mic_sessions/$(data.lastRefundedSessionId)) &&
+         get(/databases/$(database)/documents/mic_sessions/$(data.lastRefundedSessionId)).data.requesterId == request.auth.uid &&
+         get(/databases/$(database)/documents/mic_sessions/$(data.lastRefundedSessionId)).data.escrowStatus == 'refund_pending' &&
+         getAfter(/databases/$(database)/documents/mic_sessions/$(data.lastRefundedSessionId)).data.escrowStatus == 'refunded' &&
+         data.phoneTokenBalance == prev.get('phoneTokenBalance', 0) + get(/databases/$(database)/documents/mic_sessions/$(data.lastRefundedSessionId)).data.totalTokensCost) ||
+        // Action: Buy video tokens for 1:1 creator private chat video calls (100 tokens/min)
+        (changed.hasOnly(['videoTokenBalance', 'totalVideoTokensPurchased', 'updatedAt']) &&
+         data.videoTokenBalance is int &&
+         data.totalVideoTokensPurchased is int &&
+         data.videoTokenBalance > prev.get('videoTokenBalance', 0) &&
+         data.videoTokenBalance <= 1000000 &&
+         (data.videoTokenBalance - prev.get('videoTokenBalance', 0)) <= 5000 &&
+         (data.totalVideoTokensPurchased - prev.get('totalVideoTokensPurchased', 0)) == (data.videoTokenBalance - prev.get('videoTokenBalance', 0)) &&
+         data.totalVideoTokensPurchased <= 10000000) ||
+        // Action: Spend video tokens (100 tokens/min) to request a private chat video session
+        (changed.hasOnly(['videoTokenBalance', 'updatedAt']) &&
+         data.videoTokenBalance is int &&
+         data.videoTokenBalance >= 0 &&
+         data.videoTokenBalance < prev.get('videoTokenBalance', 0) &&
+         ((prev.get('videoTokenBalance', 0) - data.videoTokenBalance) % 100 == 0) &&
+         (prev.get('videoTokenBalance', 0) - data.videoTokenBalance) <= 6000) ||
+        // Action: Claim atomic 100% video token refund from a declined/cancelled video session
+        (changed.hasOnly(['videoTokenBalance', 'lastRefundedVideoSessionId', 'updatedAt']) &&
+         data.lastRefundedVideoSessionId is string &&
+         isValidId(data.lastRefundedVideoSessionId) &&
+         exists(/databases/$(database)/documents/video_sessions/$(data.lastRefundedVideoSessionId)) &&
+         get(/databases/$(database)/documents/video_sessions/$(data.lastRefundedVideoSessionId)).data.requesterId == request.auth.uid &&
+         get(/databases/$(database)/documents/video_sessions/$(data.lastRefundedVideoSessionId)).data.escrowStatus == 'refund_pending' &&
+         getAfter(/databases/$(database)/documents/video_sessions/$(data.lastRefundedVideoSessionId)).data.escrowStatus == 'refunded' &&
+         data.videoTokenBalance == prev.get('videoTokenBalance', 0) + get(/databases/$(database)/documents/video_sessions/$(data.lastRefundedVideoSessionId)).data.totalTokensCost) ||
+        // Action: Support staff (6+ months / 180+ days tenure) claims weekly 100-token stipend
+        (changed.hasOnly(['voteBalance', 'lastSupportPayClaimAt', 'totalSupportPayTokensEarned', 'updatedAt']) &&
+         hasSixMonthSupportTenure() &&
+         hasSupportWeeklyCooldownElapsed() &&
+         data.voteBalance == prev.voteBalance + 100 &&
+         data.voteBalance <= 1000000 &&
+         data.totalVotesCast == prev.totalVotesCast &&
+         data.totalVotesPurchased == prev.totalVotesPurchased &&
+         data.totalSupportPayTokensEarned == prev.get('totalSupportPayTokensEarned', 0) + 100 &&
+         data.lastSupportPayClaimAt is timestamp &&
+         data.lastSupportPayClaimAt <= request.time &&
+         data.lastSupportPayClaimAt >= request.time - duration.value(5, 'm'))
+      );
+    }
+
+    function isSelfUserUpdateAllowed(data, prev, changed) {
+      return isSelfUserTokenActionAllowed(data, prev, changed) ||
+             isSelfUserCommsOrProfileActionAllowed(data, prev, changed);
+    }
+
+    function isValidCreatorUnlock(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.creatorId is string &&
+             data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.votesSpent is int &&
+             data.votesSpent >= 1 && data.votesSpent <= 100 &&
+             data.unlockedAt is timestamp && data.unlockedAt <= request.time;
+    }
+
+    function isValidVotePurchase(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.packId is string &&
+             data.packId.size() >= 1 && data.packId.size() <= 40 &&
+             data.packTitle is string &&
+             data.packTitle.size() >= 1 && data.packTitle.size() <= 60 &&
+             data.votesAdded is int &&
+             data.votesAdded >= 1 && data.votesAdded <= 1000 &&
+             data.priceLabel is string &&
+             data.priceLabel.size() >= 1 && data.priceLabel.size() <= 20 &&
+             data.purchasedAt is timestamp && data.purchasedAt <= request.time;
+    }
+
+    function isValidCreatorSummary(data) {
+      return data.creatorId is string &&
+             data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('bio' in data) || data.bio == null || (data.bio is string && data.bio.size() <= 240)) &&
+             (!('age' in data) || data.age == null || (data.age is int && data.age >= 18 && data.age <= 110)) &&
+             (!('sex' in data) || data.sex == null || data.sex in ['female', 'male', 'non_binary', 'unspecified']) &&
+             data.visibility in ['public', 'hidden'] &&
+             data.postCount is int &&
+             data.postCount >= 0 && data.postCount <= 100000 &&
+             data.totalVotesReceived is int &&
+             data.totalVotesReceived >= 0 && data.totalVotesReceived <= 10000000 &&
+             data.freePreviewLimit is int &&
+             data.freePreviewLimit >= 1 && data.freePreviewLimit <= 10 &&
+             data.unlockCostVotes is int &&
+             data.unlockCostVotes >= 1 && data.unlockCostVotes <= 25 &&
+             (!('isOnline' in data) || data.isOnline is bool) &&
+             (!('lastSeenAt' in data) || data.lastSeenAt == null || data.lastSeenAt is timestamp) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidMediaPost(data) {
+      return data.creatorId is string &&
+             data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.creatorName is string &&
+             data.creatorName.size() >= 1 && data.creatorName.size() <= 60 &&
+             data.mediaType in ['photo', 'video'] &&
+             data.caption is string &&
+             data.caption.size() <= 240 &&
+             data.mediaBase64 is string &&
+             data.mediaBase64.size() >= 1 && data.mediaBase64.size() <= 400000 &&
+             (!('mediaDownloadUrl' in data) || data.mediaDownloadUrl == null || (data.mediaDownloadUrl is string && data.mediaDownloadUrl.size() <= 1000)) &&
+             (!('storagePath' in data) || data.storagePath == null || (data.storagePath is string && data.storagePath.size() <= 260)) &&
+             (!('localVideoFileName' in data) || data.localVideoFileName == null || (data.localVideoFileName is string && data.localVideoFileName.size() <= 120)) &&
+             data.durationMs is int &&
+             data.durationMs >= 0 && data.durationMs <= 3600000 &&
+             data.postIndex is int &&
+             data.postIndex >= 0 && data.postIndex <= 100000 &&
+             data.voteCount is int &&
+             data.voteCount >= 0 && data.voteCount <= 10000000 &&
+             data.visibility in ['public', 'hidden'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidPostVoteRecord(data) {
+      return data.postId is string &&
+             data.postId.size() >= 1 && data.postId.size() <= 128 &&
+             data.voterId is string &&
+             data.voterId.size() >= 1 && data.voterId.size() <= 128 &&
+             data.votesCast is int &&
+             data.votesCast >= 1 && data.votesCast <= 1000000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidStaffRole(data) {
+      return data.email is string &&
+             isValidStaffEmailId(data.email) &&
+             (!('displayLabel' in data) || data.displayLabel == null || (data.displayLabel is string && data.displayLabel.size() <= 60)) &&
+             data.role in ['admin', 'support'] &&
+             data.active is bool &&
+             data.assignedByUid is string &&
+             data.assignedByUid.size() >= 1 && data.assignedByUid.size() <= 128 &&
+             data.assignedByEmail is string &&
+             data.assignedByEmail.size() >= 3 && data.assignedByEmail.size() <= 128 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidContentReport(data) {
+      return data.postId is string &&
+             data.postId.size() >= 1 && data.postId.size() <= 128 &&
+             data.postCreatorId is string &&
+             data.postCreatorId.size() >= 1 && data.postCreatorId.size() <= 128 &&
+             data.postCaption is string &&
+             data.postCaption.size() <= 240 &&
+             data.reporterId is string &&
+             data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.reason is string &&
+             data.reason.size() >= 1 && data.reason.size() <= 120 &&
+             data.status in ['open', 'resolved', 'dismissed'] &&
+             (!('reviewedByUid' in data) || data.reviewedByUid == null || (data.reviewedByUid is string && data.reviewedByUid.size() <= 128)) &&
+             (!('resolutionNote' in data) || data.resolutionNote == null || (data.resolutionNote is string && data.resolutionNote.size() <= 240)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidChatMessage(data) {
+      return isValidRoomId(data.roomId) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRole in ['user', 'support', 'admin', 'owner'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidChatRoomState(data) {
+      return isValidRoomId(data.roomId) &&
+             (data.monitorUid == null || (data.monitorUid is string && data.monitorUid.size() >= 1 && data.monitorUid.size() <= 128)) &&
+             (data.monitorName == null || (data.monitorName is string && data.monitorName.size() >= 1 && data.monitorName.size() <= 60)) &&
+             data.monitorAssignedAt is timestamp && data.monitorAssignedAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidRoomPresence(data) {
+      return isValidRoomId(data.roomId) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.role in ['user', 'support', 'admin', 'owner'] &&
+             data.isInvisible is bool &&
+             (!('handRaised' in data) || data.handRaised is bool) &&
+             (!('handRaisedAt' in data) || (data.handRaisedAt is int && data.handRaisedAt >= 0)) &&
+             (!('isVoiceMuted' in data) || data.isVoiceMuted is bool) &&
+             (!('voiceMutedByUid' in data) || data.voiceMutedByUid == null || (data.voiceMutedByUid is string && data.voiceMutedByUid.size() <= 128)) &&
+             (!('isSpeaking' in data) || data.isSpeaking is bool) &&
+             (!('joinedAtMillis' in data) || (data.joinedAtMillis is int && data.joinedAtMillis >= 0)) &&
+             data.joinedAt is timestamp && data.joinedAt <= request.time &&
+             data.lastActiveAt is timestamp && data.lastActiveAt <= request.time;
+    }
+
+    function isValidChatVoiceChunk(data, roomId) {
+      return data.chunkId is string &&
+             data.chunkId.size() >= 1 && data.chunkId.size() <= 128 &&
+             data.roomId == roomId &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.sampleRate is int && data.sampleRate == 8000 &&
+             data.audioBase64 is string && data.audioBase64.size() >= 1 && data.audioBase64.size() <= 60000 &&
+             data.durationMs is int && data.durationMs >= 50 && data.durationMs <= 5000 &&
+             data.sequenceNumber is int && data.sequenceNumber >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidRoomBounce(data) {
+      return isValidRoomId(data.roomId) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 160 &&
+             data.bouncedByUid is string && data.bouncedByUid.size() >= 1 && data.bouncedByUid.size() <= 128 &&
+             data.bouncedUntil is timestamp &&
+             data.bouncedAt is timestamp && data.bouncedAt <= request.time;
+    }
+
+    function isValidChatModeration(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('mutedUntil' in data) || data.mutedUntil == null || data.mutedUntil is timestamp) &&
+             (!('muteReason' in data) || data.muteReason == null || (data.muteReason is string && data.muteReason.size() <= 160)) &&
+             data.banned is bool &&
+             (!('banReason' in data) || data.banReason == null || (data.banReason is string && data.banReason.size() <= 160)) &&
+             (!('suspendedUntil' in data) || data.suspendedUntil == null || data.suspendedUntil is timestamp) &&
+             (!('suspendReason' in data) || data.suspendReason == null || (data.suspendReason is string && data.suspendReason.size() <= 160)) &&
+             (!('accountBanned' in data) || data.accountBanned is bool) &&
+             (!('accountBanReason' in data) || data.accountBanReason == null || (data.accountBanReason is string && data.accountBanReason.size() <= 160)) &&
+             data.moderatedByUid is string && data.moderatedByUid.size() >= 1 && data.moderatedByUid.size() <= 128 &&
+             (!('moderatedByEmail' in data) || data.moderatedByEmail == null || (data.moderatedByEmail is string && data.moderatedByEmail.size() <= 128)) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidFriendRelationship(data) {
+      return data.pairId is string && data.pairId.size() >= 3 && data.pairId.size() <= 260 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.receiverId is string && data.receiverId.size() >= 1 && data.receiverId.size() <= 128 &&
+             data.receiverName is string && data.receiverName.size() >= 1 && data.receiverName.size() <= 60 &&
+             data.senderId != data.receiverId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.senderId in data.participantIds && data.receiverId in data.participantIds &&
+             data.status in ['pending', 'accepted', 'declined'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidDirectChatThread(data) {
+      return data.threadId is string && data.threadId.size() >= 3 && data.threadId.size() <= 260 &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.participantIds[0] != data.participantIds[1] &&
+             data.participantNames is map &&
+             data.lastMessageText is string && data.lastMessageText.size() <= 500 &&
+             (!('lastMessageSenderId' in data) || data.lastMessageSenderId == null || data.lastMessageSenderId is string) &&
+             (!('lastMessageAt' in data) || data.lastMessageAt == null || data.lastMessageAt is timestamp) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidDirectMessage(data, threadId) {
+      return data.threadId == threadId &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             (!('messageType' in data) || data.messageType in ['text', 'snap']) &&
+             data.text is string && data.text.size() <= 500 &&
+             (
+               (('messageType' in data) && data.messageType == 'snap')
+                 ? ((!('snapBase64' in data) || data.snapBase64 == null || (data.snapBase64 is string && data.snapBase64.size() <= 400000)) &&
+                    (!('snapDownloadUrl' in data) || data.snapDownloadUrl == null || (data.snapDownloadUrl is string && data.snapDownloadUrl.size() <= 1000)) &&
+                    (!('snapStoragePath' in data) || data.snapStoragePath == null || (data.snapStoragePath is string && data.snapStoragePath.size() <= 260)) &&
+                    ((('snapBase64' in data) && data.snapBase64 is string && data.snapBase64.size() >= 1) ||
+                     (('snapDownloadUrl' in data) && data.snapDownloadUrl is string && data.snapDownloadUrl.size() >= 1)) &&
+                    (!('snapDurationSeconds' in data) || (data.snapDurationSeconds is int && data.snapDurationSeconds >= 0 && data.snapDurationSeconds <= 30)) &&
+                    (!('viewedByIds' in data) || (data.viewedByIds is list && data.viewedByIds.size() <= 2)))
+                 : (data.text.size() >= 1)
+             ) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidPrivateGroupChat(data) {
+      return data.groupId is string && data.groupId.size() >= 1 && data.groupId.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.description is string && data.description.size() <= 200 &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.memberIds is list && data.memberIds.size() >= 1 && data.memberIds.size() <= 50 &&
+             data.ownerId in data.memberIds &&
+             data.memberNames is map &&
+             data.privacyMode in ['invite_only', 'friends_can_invite'] &&
+             data.allowMemberInvites is bool &&
+             data.lastMessageText is string && data.lastMessageText.size() <= 500 &&
+             (!('lastMessageAt' in data) || data.lastMessageAt == null || data.lastMessageAt is timestamp) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidGroupMessage(data, groupId) {
+      return data.groupId == groupId &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidPhoneTokenPurchase(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.packId is string &&
+             data.packId.size() >= 1 && data.packId.size() <= 40 &&
+             data.packTitle is string &&
+             data.packTitle.size() >= 1 && data.packTitle.size() <= 60 &&
+             data.tokensAdded is int &&
+             data.tokensAdded >= 1 && data.tokensAdded <= 1000 &&
+             data.priceLabel is string &&
+             data.priceLabel.size() >= 1 && data.priceLabel.size() <= 20 &&
+             data.purchasedAt is timestamp && data.purchasedAt <= request.time;
+    }
+
+    function isValidVideoTokenPurchase(data) {
+      return data.userId is string &&
+             data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.packId is string &&
+             data.packId.size() >= 1 && data.packId.size() <= 40 &&
+             data.packTitle is string &&
+             data.packTitle.size() >= 1 && data.packTitle.size() <= 60 &&
+             data.tokensAdded is int &&
+             data.tokensAdded >= 1 && data.tokensAdded <= 5000 &&
+             data.priceLabel is string &&
+             data.priceLabel.size() >= 1 && data.priceLabel.size() <= 20 &&
+             data.purchasedAt is timestamp && data.purchasedAt <= request.time;
+    }
+
+    function isValidCreatorPayout(data) {
+      return data.payoutId is string &&
+             data.payoutId.size() >= 1 && data.payoutId.size() <= 128 &&
+             data.creatorId is string &&
+             data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.payerId is string &&
+             data.payerId.size() >= 1 && data.payerId.size() <= 128 &&
+             data.creatorId != data.payerId &&
+             data.payerName is string &&
+             data.payerName.size() >= 1 && data.payerName.size() <= 60 &&
+             data.sourceType in ['gallery_unlock', 'mic_call', 'video_call'] &&
+             data.sourceId is string &&
+             data.sourceId.size() >= 1 && data.sourceId.size() <= 128 &&
+             data.grossTokens is int &&
+             data.grossTokens >= 1 && data.grossTokens <= 10000 &&
+             data.creatorShareCents is int &&
+             (
+               (data.sourceType == 'gallery_unlock' &&
+                data.creatorSharePercent == 40 &&
+                data.creatorShareCents == (data.grossTokens * 10 * 40) / 100) ||
+               (data.sourceType in ['mic_call', 'video_call'] &&
+                data.creatorSharePercent == 70 &&
+                data.creatorShareCents == (data.grossTokens * 10 * 70) / 100)
+             ) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidMicSession(data) {
+      return data.sessionId is string &&
+             data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.requesterId is string && data.requesterId.size() >= 1 && data.requesterId.size() <= 128 &&
+             data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 60 &&
+             data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 60 &&
+             data.requesterId != data.creatorId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.requesterId in data.participantIds && data.creatorId in data.participantIds &&
+             data.topic is string && data.topic.size() <= 160 &&
+             data.scheduledForMillis is int && data.scheduledForMillis > 0 &&
+             data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 60 &&
+             data.tokensPerMinute == 0 &&
+             data.totalTokensCost == 0 &&
+             data.creatorShareTokens == 0 &&
+             data.creatorShareCents == 0 &&
+             data.status in ['pending', 'accepted', 'active', 'completed', 'declined', 'cancelled'] &&
+             data.escrowStatus == 'free' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidMicAudioChunk(data, sessionId) {
+      return data.chunkId is string &&
+             data.sessionId == sessionId &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.sampleRate is int && data.sampleRate == 8000 &&
+             data.audioBase64 is string && data.audioBase64.size() >= 1 && data.audioBase64.size() <= 60000 &&
+             data.durationMs is int && data.durationMs >= 50 && data.durationMs <= 5000 &&
+             data.sequenceNumber is int && data.sequenceNumber >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidVideoSession(data) {
+      return data.sessionId is string &&
+             data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.threadId is string &&
+             data.threadId.size() >= 3 && data.threadId.size() <= 260 &&
+             data.requesterId is string && data.requesterId.size() >= 1 && data.requesterId.size() <= 128 &&
+             data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 60 &&
+             data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 60 &&
+             data.requesterId != data.creatorId &&
+             data.participantIds is list && data.participantIds.size() == 2 &&
+             data.requesterId in data.participantIds && data.creatorId in data.participantIds &&
+             data.note is string && data.note.size() <= 160 &&
+             data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 60 &&
+             data.tokensPerMinute == 0 &&
+             data.totalTokensCost == 0 &&
+             data.creatorShareTokens == 0 &&
+             data.creatorShareCents == 0 &&
+             data.status in ['pending', 'accepted', 'active', 'completed', 'declined', 'cancelled'] &&
+             data.escrowStatus == 'free' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidVideoFrameChunk(data, sessionId) {
+      return data.frameId is string &&
+             data.frameId.size() >= 1 && data.frameId.size() <= 128 &&
+             data.sessionId == sessionId &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.frameBase64 is string && data.frameBase64.size() >= 1 && data.frameBase64.size() <= 150000 &&
+             data.width is int && data.width >= 1 && data.width <= 1280 &&
+             data.height is int && data.height >= 1 && data.height <= 1280 &&
+             data.sequenceNumber is int && data.sequenceNumber >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidUserReport(data) {
+      return data.reportId is string && data.reportId.size() >= 1 && data.reportId.size() <= 128 &&
+             data.reportedUserId is string && data.reportedUserId.size() >= 1 && data.reportedUserId.size() <= 128 &&
+             data.reportedUserName is string && data.reportedUserName.size() >= 1 && data.reportedUserName.size() <= 60 &&
+             data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 60 &&
+             data.reportedUserId != data.reporterId &&
+             data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 120 &&
+             data.details is string && data.details.size() <= 400 &&
+             data.sourceContext in ['discover', 'profile', 'chat_room', 'direct_chat', 'group_chat', 'friends'] &&
+             data.status in ['open', 'action_taken', 'dismissed'] &&
+             (!('reviewedByUid' in data) || data.reviewedByUid == null || (data.reviewedByUid is string && data.reviewedByUid.size() <= 128)) &&
+             (!('resolutionNote' in data) || data.resolutionNote == null || (data.resolutionNote is string && data.resolutionNote.size() <= 240)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSupportTicket(data) {
+      return data.ticketId is string && data.ticketId.size() >= 1 && data.ticketId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 60 &&
+             (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 128)) &&
+             data.category in ['account_appeal', 'tokens_billing', 'safety_harassment', 'mic_calls', 'technical_bug', 'other'] &&
+             data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 120 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 600 &&
+             data.status in ['open', 'in_progress', 'resolved', 'closed'] &&
+             (!('staffReply' in data) || data.staffReply == null || (data.staffReply is string && data.staffReply.size() <= 600)) &&
+             (!('respondedByUid' in data) || data.respondedByUid == null || (data.respondedByUid is string && data.respondedByUid.size() <= 128)) &&
+             (!('respondedByName' in data) || data.respondedByName == null || (data.respondedByName is string && data.respondedByName.size() <= 60)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSupportPayrollPayout(data) {
+      return data.payoutId is string &&
+             data.payoutId.size() >= 1 && data.payoutId.size() <= 128 &&
+             data.staffUserId is string && data.staffUserId.size() >= 1 && data.staffUserId.size() <= 128 &&
+             data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 60 &&
+             (!('staffEmail' in data) || data.staffEmail == null || (data.staffEmail is string && data.staffEmail.size() <= 128)) &&
+             data.tokensAwarded == 100 &&
+             data.usdValueCents == 1000 &&
+             data.weekLabel is string && data.weekLabel.size() >= 1 && data.weekLabel.size() <= 40 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidBanRequest(data) {
+      return data.requestId is string && data.requestId.size() >= 1 && data.requestId.size() <= 128 &&
+             data.targetUserId is string && data.targetUserId.size() >= 1 && data.targetUserId.size() <= 128 &&
+             data.targetUserName is string && data.targetUserName.size() >= 1 && data.targetUserName.size() <= 60 &&
+             data.requestedByUid is string && data.requestedByUid.size() >= 1 && data.requestedByUid.size() <= 128 &&
+             data.requestedByName is string && data.requestedByName.size() >= 1 && data.requestedByName.size() <= 60 &&
+             (!('requestedByEmail' in data) || data.requestedByEmail == null || (data.requestedByEmail is string && data.requestedByEmail.size() <= 128)) &&
+             data.banScope in ['account', 'chat'] &&
+             data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 240 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             (!('reviewedByUid' in data) || data.reviewedByUid == null || (data.reviewedByUid is string && data.reviewedByUid.size() <= 128)) &&
+             (!('reviewedByName' in data) || data.reviewedByName == null || (data.reviewedByName is string && data.reviewedByName.size() <= 60)) &&
+             (!('reviewNote' in data) || data.reviewNote == null || (data.reviewNote is string && data.reviewNote.size() <= 240)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidReferralCodeEntry(data, code) {
+      return data.code == code &&
+             isValidReferralCode(code) &&
+             data.ownerId is string && isValidId(data.ownerId) &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 60 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidReferralRecord(data) {
+      return data.referredUserId is string && isValidId(data.referredUserId) &&
+             data.referredUserName is string && data.referredUserName.size() >= 1 && data.referredUserName.size() <= 60 &&
+             data.referrerId is string && isValidId(data.referrerId) &&
+             data.referredUserId != data.referrerId &&
+             data.referrerName is string && data.referrerName.size() >= 1 && data.referrerName.size() <= 60 &&
+             isValidReferralCode(data.referralCode) &&
+             data.status in ['pending', 'qualified'] &&
+             (!('qualifyingPurchaseType' in data) || data.qualifyingPurchaseType == null || data.qualifyingPurchaseType in ['vote_pack', 'phone_pack', 'video_pack']) &&
+             (!('qualifyingPurchaseId' in data) || data.qualifyingPurchaseId == null || (data.qualifyingPurchaseId is string && isValidId(data.qualifyingPurchaseId))) &&
+             data.rewardClaimed is bool &&
+             (!('rewardClaimId' in data) || data.rewardClaimId == null || (data.rewardClaimId is string && isValidId(data.rewardClaimId))) &&
+             (!('qualifiedAt' in data) || data.qualifiedAt == null || data.qualifiedAt is timestamp) &&
+             (!('claimedAt' in data) || data.claimedAt == null || data.claimedAt is timestamp) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isClaimedReferralValid(refId, claimId) {
+      return refId is string &&
+             getAfter(/databases/$(database)/documents/referrals/$(refId)).data.rewardClaimId == claimId;
+    }
+
+    function isValidReferralClaim(data, claimId) {
+      return data.claimId == claimId &&
+             data.referrerId is string && isValidId(data.referrerId) &&
+             data.referrerName is string && data.referrerName.size() >= 1 && data.referrerName.size() <= 60 &&
+             data.qualifiedReferralIds is list &&
+             data.qualifiedReferralIds.size() == 10 &&
+             data.qualifiedReferralIds.toSet().size() == 10 &&
+             data.referralCountRequired == 10 &&
+             data.tokensAwarded == 100 &&
+             data.cashValueCents == 1000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidReferralCashout(data, cashoutId) {
+      return data.cashoutId == cashoutId &&
+             data.userId is string && isValidId(data.userId) &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 60 &&
+             data.tokensCashedIn is int &&
+             data.tokensCashedIn >= 1 && data.tokensCashedIn <= 100000 &&
+             data.usdCents is int &&
+             data.usdCents == data.tokensCashedIn * 10 &&
+             data.payoutMethod in ['instant_payout', 'paypal', 'bank_ach'] &&
+             data.payoutDestination is string &&
+             data.payoutDestination.size() >= 3 && data.payoutDestination.size() <= 120 &&
+             data.status in ['submitted', 'completed'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidStory(data, storyId) {
+      return data.storyId == storyId &&
+             data.userId is string && isValidId(data.userId) &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 60 &&
+             data.storyType in ['photo', 'message'] &&
+             data.text is string && data.text.size() <= 280 &&
+             data.backgroundStyle is string && data.backgroundStyle.size() >= 1 && data.backgroundStyle.size() <= 40 &&
+             data.viewCount is int && data.viewCount >= 0 && data.viewCount <= 10000000 &&
+             (!('mediaBase64' in data) || data.mediaBase64 == null || (data.mediaBase64 is string && data.mediaBase64.size() <= 400000)) &&
+             (!('mediaDownloadUrl' in data) || data.mediaDownloadUrl == null || (data.mediaDownloadUrl is string && data.mediaDownloadUrl.size() <= 1000)) &&
+             (!('storagePath' in data) || data.storagePath == null || (data.storagePath is string && data.storagePath.size() <= 260)) &&
+             (
+               (data.storyType == 'photo' &&
+                ((('mediaBase64' in data) && data.mediaBase64 is string && data.mediaBase64.size() >= 1) ||
+                 (('mediaDownloadUrl' in data) && data.mediaDownloadUrl is string && data.mediaDownloadUrl.size() >= 1))) ||
+               (data.storyType == 'message' && data.text.size() >= 1)
+             ) &&
+             data.expiresAt is timestamp &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCheckIn(data, userId) {
+      return data.userId == userId &&
+             data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 60 &&
+             data.placeLabel is string && data.placeLabel.size() >= 1 && data.placeLabel.size() <= 60 &&
+             data.statusNote is string && data.statusNote.size() <= 120 &&
+             data.vibeTag is string && data.vibeTag.size() >= 1 && data.vibeTag.size() <= 30 &&
+             data.expiresAt is timestamp &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminAnnouncement(data, announcementId) {
+      return data.announcementId == announcementId &&
+             data.category in ['alert', 'news'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 600 &&
+             data.senderId is string && isValidId(data.senderId) &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRole in ['owner', 'admin'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidUserWarning(data, warningId) {
+      return data.warningId == warningId &&
+             data.targetUserId is string && isValidId(data.targetUserId) &&
+             data.targetUserName is string && data.targetUserName.size() >= 1 && data.targetUserName.size() <= 60 &&
+             data.senderId is string && isValidId(data.senderId) &&
+             data.targetUserId != data.senderId &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRole in ['owner', 'admin', 'support'] &&
+             data.severity in ['reminder', 'warning', 'final_warning'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 600 &&
+             data.acknowledged is bool &&
+             (!('acknowledgedAt' in data) || data.acknowledgedAt == null || (data.acknowledgedAt is timestamp && data.acknowledgedAt <= request.time)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // --- COLLECTION RULES ---
+
+    match /support_payroll/{payoutId} {
+      allow get: if isSignedIn() && isValidId(payoutId) &&
+                    ((resource != null && existing().staffUserId == request.auth.uid) || isAdmin());
+      allow list: if isAdmin() ||
+                     (isSignedIn() && resource.data.staffUserId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(payoutId) &&
+                       incoming().payoutId == payoutId &&
+                       incoming().staffUserId == request.auth.uid &&
+                       incoming().keys().hasAll(['payoutId', 'staffUserId', 'staffName', 'tokensAwarded', 'usdValueCents', 'weekLabel', 'createdAt']) &&
+                       incoming().keys().hasOnly(['payoutId', 'staffUserId', 'staffName', 'staffEmail', 'tokensAwarded', 'usdValueCents', 'weekLabel', 'createdAt']) &&
+                       isValidSupportPayrollPayout(incoming()) &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                       getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.voteBalance == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.voteBalance + 100;
+
+      allow update, delete: if false;
+    }
+
+    match /staff_roles/{staffEmail} {
+      allow get: if isValidStaffEmailId(staffEmail) &&
+                    ((hasVerifiedEmail() && request.auth.token.email.lower() == staffEmail) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isAdmin() &&
+                       isValidStaffEmailId(staffEmail) &&
+                       staffEmail != 'daj18801@gmail.com' &&
+                       incoming().email == staffEmail &&
+                       incoming().assignedByUid == request.auth.uid &&
+                       incoming().keys().hasAll(['email', 'role', 'active', 'assignedByUid', 'assignedByEmail', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['email', 'displayLabel', 'role', 'active', 'assignedByUid', 'assignedByEmail', 'createdAt', 'updatedAt']) &&
+                       isValidStaffRole(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidStaffEmailId(staffEmail) &&
+                       staffEmail != 'daj18801@gmail.com' &&
+                       incoming().email == existing().email &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidStaffRole(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayLabel', 'role', 'active', 'assignedByUid', 'assignedByEmail', 'updatedAt']);
+
+      allow delete: if isAdmin() &&
+                       isValidStaffEmailId(staffEmail) &&
+                       staffEmail != 'daj18801@gmail.com';
+    }
+
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) &&
+                    ((resource != null && existing().reporterId == request.auth.uid) || isSupportOrAdmin());
+      allow list: if isSupportOrAdmin() ||
+                     (isSignedIn() && resource.data.reporterId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(reportId) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'open' &&
+                       incoming().keys().hasAll(['postId', 'postCreatorId', 'postCaption', 'reporterId', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['postId', 'postCreatorId', 'postCaption', 'reporterId', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidContentReport(incoming()) &&
+                       exists(/databases/$(database)/documents/posts/$(incoming().postId));
+
+      allow update: if isSupportOrAdmin() &&
+                       isValidId(reportId) &&
+                       incoming().postId == existing().postId &&
+                       incoming().postCreatorId == existing().postCreatorId &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidContentReport(incoming()) &&
+                       (existing().status == 'open' || isAdmin()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedByUid', 'resolutionNote', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(reportId);
+    }
+
+    match /user_reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) &&
+                    ((resource != null && existing().reporterId == request.auth.uid) || isSupportOrAdmin());
+      allow list: if isSupportOrAdmin() ||
+                     (isSignedIn() && resource.data.reporterId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(reportId) &&
+                       incoming().reportId == reportId &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'open' &&
+                       (!('reviewedByUid' in incoming()) || incoming().reviewedByUid == null) &&
+                       (!('resolutionNote' in incoming()) || incoming().resolutionNote == null) &&
+                       incoming().keys().hasAll(['reportId', 'reportedUserId', 'reportedUserName', 'reporterId', 'reporterName', 'reason', 'details', 'sourceContext', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['reportId', 'reportedUserId', 'reportedUserName', 'reporterId', 'reporterName', 'reason', 'details', 'sourceContext', 'status', 'reviewedByUid', 'resolutionNote', 'createdAt', 'updatedAt']) &&
+                       isValidUserReport(incoming());
+
+      allow update: if isSupportOrAdmin() &&
+                       isValidId(reportId) &&
+                       incoming().reportId == existing().reportId &&
+                       incoming().reportedUserId == existing().reportedUserId &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidUserReport(incoming()) &&
+                       (existing().status == 'open' || isAdmin()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedByUid', 'resolutionNote', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(reportId);
+    }
+
+    match /support_tickets/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId) &&
+                    ((resource != null && existing().userId == request.auth.uid) || isSupportOrAdmin());
+      allow list: if isSupportOrAdmin() ||
+                     (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      // Even suspended/banned users may create support tickets to submit appeals.
+      allow create: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       incoming().ticketId == ticketId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'open' &&
+                       (!('staffReply' in incoming()) || incoming().staffReply == null) &&
+                       (!('respondedByUid' in incoming()) || incoming().respondedByUid == null) &&
+                       (!('respondedByName' in incoming()) || incoming().respondedByName == null) &&
+                       incoming().keys().hasAll(['ticketId', 'userId', 'userName', 'category', 'subject', 'message', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ticketId', 'userId', 'userName', 'userEmail', 'category', 'subject', 'message', 'status', 'staffReply', 'respondedByUid', 'respondedByName', 'createdAt', 'updatedAt']) &&
+                       isValidSupportTicket(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       incoming().ticketId == existing().ticketId &&
+                       incoming().userId == existing().userId &&
+                       incoming().userName == existing().userName &&
+                       incoming().category == existing().category &&
+                       incoming().subject == existing().subject &&
+                       incoming().message == existing().message &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidSupportTicket(incoming()) && (
+                         (isSupportOrAdmin() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'staffReply', 'respondedByUid', 'respondedByName', 'updatedAt'])) ||
+                         (existing().userId == request.auth.uid &&
+                          incoming().status == 'closed' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                       );
+
+      allow delete: if isAdmin() && isValidId(ticketId);
+    }
+
+    match /ban_requests/{requestId} {
+      allow get: if isValidId(requestId) && isSupportOrAdmin();
+      allow list: if isSupportOrAdmin();
+
+      allow create: if isValidId(requestId) &&
+                       isSupportOrAdmin() &&
+                       incoming().requestId == requestId &&
+                       incoming().requestedByUid == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       !isTargetProtectedOwner(incoming().targetUserId) &&
+                       !isTargetAdmin(incoming().targetUserId) &&
+                       (!('reviewedByUid' in incoming()) || incoming().reviewedByUid == null) &&
+                       (!('reviewedByName' in incoming()) || incoming().reviewedByName == null) &&
+                       (!('reviewNote' in incoming()) || incoming().reviewNote == null) &&
+                       incoming().keys().hasAll(['requestId', 'targetUserId', 'targetUserName', 'requestedByUid', 'requestedByName', 'banScope', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['requestId', 'targetUserId', 'targetUserName', 'requestedByUid', 'requestedByName', 'requestedByEmail', 'banScope', 'reason', 'status', 'reviewedByUid', 'reviewedByName', 'reviewNote', 'createdAt', 'updatedAt']) &&
+                       isValidBanRequest(incoming());
+
+      allow update: if isValidId(requestId) &&
+                       isAdmin() &&
+                       existing().status == 'pending' &&
+                       incoming().requestId == existing().requestId &&
+                       incoming().targetUserId == existing().targetUserId &&
+                       incoming().requestedByUid == existing().requestedByUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().status in ['approved', 'rejected'] &&
+                       incoming().reviewedByUid == request.auth.uid &&
+                       isValidBanRequest(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedByUid', 'reviewedByName', 'reviewNote', 'updatedAt']);
+
+      allow delete: if isValidId(requestId) && isAdmin();
+    }
+
+    match /chat_moderation/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isSupportOrAdmin());
+      allow list: if isSupportOrAdmin();
+
+      allow create: if isValidId(userId) &&
+                       incoming().userId == userId &&
+                       incoming().moderatedByUid == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'banned', 'moderatedByUid', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'mutedUntil', 'muteReason', 'banned', 'banReason', 'suspendedUntil', 'suspendReason', 'accountBanned', 'accountBanReason', 'moderatedByUid', 'moderatedByEmail', 'updatedAt']) &&
+                       isValidChatModeration(incoming()) &&
+                       isSupportOrAdmin() &&
+                       !isTargetProtectedOwner(userId) &&
+                       (!isTargetAdmin(userId) || isAdmin()) &&
+                       (isAdmin() || (incoming().banned == false && (!('accountBanned' in incoming()) || incoming().accountBanned == false)));
+
+      allow update: if isValidId(userId) &&
+                       incoming().userId == userId &&
+                       incoming().moderatedByUid == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'banned', 'moderatedByUid', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'mutedUntil', 'muteReason', 'banned', 'banReason', 'suspendedUntil', 'suspendReason', 'accountBanned', 'accountBanReason', 'moderatedByUid', 'moderatedByEmail', 'updatedAt']) &&
+                       isValidChatModeration(incoming()) &&
+                       isSupportOrAdmin() &&
+                       !isTargetProtectedOwner(userId) &&
+                       (!isTargetAdmin(userId) || isAdmin()) &&
+                       (isAdmin() || (incoming().banned == existing().banned &&
+                                      (!('accountBanned' in incoming()) || incoming().accountBanned == (('accountBanned' in existing()) ? existing().accountBanned : false)) &&
+                                      (!('banReason' in incoming()) || incoming().banReason == (('banReason' in existing()) ? existing().banReason : null)) &&
+                                      (!('accountBanReason' in incoming()) || incoming().accountBanReason == (('accountBanReason' in existing()) ? existing().accountBanReason : null))));
+
+      allow delete: if isValidId(userId) &&
+                       isSupportOrAdmin() &&
+                       !isTargetProtectedOwner(userId) &&
+                       (!isTargetAdmin(userId) || isAdmin()) &&
+                       (isAdmin() || (existing().banned == false && (!('accountBanned' in existing()) || existing().accountBanned == false)));
+    }
+
+    match /chat_rooms/{roomId} {
+      allow get: if isSignedIn() && isValidRoomId(roomId) && canReadChatRoom(roomId);
+      allow list: if false;
+
+      allow create, update: if isSignedIn() &&
+                               isValidRoomId(roomId) &&
+                               incoming().roomId == roomId &&
+                               incoming().keys().hasAll(['roomId', 'monitorUid', 'monitorName', 'monitorAssignedAt', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['roomId', 'monitorUid', 'monitorName', 'monitorAssignedAt', 'updatedAt']) &&
+                               isValidChatRoomState(incoming()) && (
+                                 // Claim monitor when entering visibly into a vacant room or recovering from a vanished monitor
+                                 (incoming().monitorUid == request.auth.uid &&
+                                  existsAfter(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)) &&
+                                  getAfter(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data.isInvisible == false &&
+                                  (resource == null ||
+                                   existing().monitorUid == null ||
+                                   existing().monitorUid == request.auth.uid ||
+                                   !exists(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(existing().monitorUid)) ||
+                                   get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(existing().monitorUid)).data.isInvisible == true)) ||
+                                 // Monitor leaving/bounced hands over to next visible member or clears monitor to null when empty
+                                 ((resource != null && (existing().monitorUid == request.auth.uid || isSupportOrAdmin())) && (
+                                   (incoming().monitorUid == null && incoming().monitorName == null) ||
+                                   (incoming().monitorUid != null &&
+                                    incoming().monitorUid != existing().monitorUid &&
+                                    existsAfter(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(incoming().monitorUid)) &&
+                                    getAfter(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(incoming().monitorUid)).data.isInvisible == false)
+                                 ))
+                               );
+
+      allow delete: if false;
+
+      function isRoomVoiceMuted(roomId) {
+        return exists(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)) &&
+               ('isVoiceMuted' in get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data) &&
+               get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data.isVoiceMuted == true;
+      }
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidRoomId(roomId) && isValidId(messageId) && canReadChatRoom(roomId);
+        allow list: if isSignedIn() && isValidRoomId(roomId) && canReadChatRoom(roomId);
+
+        allow create: if isSignedIn() &&
+                         isValidRoomId(roomId) &&
+                         isValidId(messageId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().roomId == roomId &&
+                         incoming().keys().hasAll(['roomId', 'senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+                         isValidChatMessage(incoming()) &&
+                         (!isRoomVoiceMuted(roomId) || isAdmin()) && (
+                           (incoming().senderRole == 'user' && !isAccountRestricted() && !isChatBanned() && !isChatMuted() && !isBouncedFromRoom(roomId) && hasPaidOrTrialChatAccess()) ||
+                           isStaffAllowedSenderRole(incoming().senderRole)
+                         );
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidRoomId(roomId) && isValidId(messageId) &&
+                         (existing().senderId == request.auth.uid || isSupportOrAdmin());
+      }
+
+      match /presence/{userId} {
+        allow get: if isSignedIn() && isValidRoomId(roomId) && isValidId(userId) &&
+                      (request.auth.uid == userId || (resource != null && existing().isInvisible == false && canReadChatRoom(roomId)) || isAdmin());
+        allow list: if isSignedIn() && isValidRoomId(roomId) &&
+                       ((resource.data.isInvisible == false && canReadChatRoom(roomId)) || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidRoomId(roomId) &&
+                         isValidId(userId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().roomId == roomId &&
+                         incoming().keys().hasAll(['roomId', 'userId', 'displayName', 'role', 'isInvisible', 'joinedAt', 'lastActiveAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'userId', 'displayName', 'role', 'isInvisible', 'handRaised', 'handRaisedAt', 'isVoiceMuted', 'voiceMutedByUid', 'isSpeaking', 'joinedAtMillis', 'joinedAt', 'lastActiveAt']) &&
+                         (!('isVoiceMuted' in incoming()) || incoming().isVoiceMuted == false || isChatMuted()) &&
+                         (!('voiceMutedByUid' in incoming()) || incoming().voiceMutedByUid == null || isChatMuted()) &&
+                         (!('isSpeaking' in incoming()) || incoming().isSpeaking == false) &&
+                         isValidRoomPresence(incoming()) && (
+                           (incoming().isInvisible == false && !isAccountRestricted() && !isChatBanned() && !isBouncedFromRoom(roomId) && hasPaidOrTrialChatAccess()) ||
+                           isSupportOrAdmin()
+                         );
+
+        allow update: if isSignedIn() &&
+                         isValidRoomId(roomId) &&
+                         isValidId(userId) &&
+                         incoming().userId == userId &&
+                         incoming().roomId == roomId &&
+                         incoming().keys().hasAll(['roomId', 'userId', 'displayName', 'role', 'isInvisible', 'joinedAt', 'lastActiveAt']) &&
+                         incoming().keys().hasOnly(['roomId', 'userId', 'displayName', 'role', 'isInvisible', 'handRaised', 'handRaisedAt', 'isVoiceMuted', 'voiceMutedByUid', 'isSpeaking', 'joinedAtMillis', 'joinedAt', 'lastActiveAt']) &&
+                         isValidRoomPresence(incoming()) && (
+                           // Self update (cannot clear monitor mute on self; cannot speak while muted or invisible)
+                           (request.auth.uid == userId &&
+                            (!('isVoiceMuted' in existing()) || incoming().isVoiceMuted == existing().isVoiceMuted) &&
+                            (!('voiceMutedByUid' in existing()) || incoming().voiceMutedByUid == existing().voiceMutedByUid) &&
+                            (!('isSpeaking' in incoming()) || incoming().isSpeaking == false ||
+                              ((!('isVoiceMuted' in incoming()) || incoming().isVoiceMuted == false) && !isChatMuted() && incoming().isInvisible == false)) &&
+                            ((incoming().isInvisible == false && !isAccountRestricted() && !isChatBanned() && !isBouncedFromRoom(roomId) && hasPaidOrTrialChatAccess()) ||
+                             isSupportOrAdmin())) ||
+                           // Room Monitor or Staff muting/unmuting voice or lowering hand
+                           (request.auth.uid != userId &&
+                            (isRoomMonitor(roomId) || isSupportOrAdmin()) &&
+                            !isTargetProtectedOwner(userId) &&
+                            (!isTargetAdmin(userId) || isAdmin()) &&
+                            (isSupportOrAdmin() || !isTargetStaff(userId)) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['isVoiceMuted', 'voiceMutedByUid', 'isSpeaking', 'handRaised', 'handRaisedAt', 'lastActiveAt']) &&
+                            ((incoming().isVoiceMuted == true && incoming().voiceMutedByUid == request.auth.uid && incoming().isSpeaking == false) ||
+                             (incoming().isVoiceMuted == false && incoming().voiceMutedByUid == null) ||
+                             incoming().diff(existing()).affectedKeys().hasOnly(['handRaised', 'handRaisedAt', 'lastActiveAt'])))
+                         );
+
+        allow delete: if isSignedIn() && isValidRoomId(roomId) && isValidId(userId) && (
+                         request.auth.uid == userId ||
+                         ((isSupportOrAdmin() || isRoomMonitor(roomId)) &&
+                          !isTargetProtectedOwner(userId) &&
+                          (!isTargetAdmin(userId) || isAdmin()) &&
+                          (isSupportOrAdmin() || !isTargetStaff(userId)))
+                       );
+      }
+
+      match /voice_chunks/{chunkId} {
+        allow get: if isSignedIn() && isValidRoomId(roomId) && isValidId(chunkId) && canReadChatRoom(roomId);
+        allow list: if isSignedIn() && isValidRoomId(roomId) && canReadChatRoom(roomId);
+
+        allow create: if isSignedIn() &&
+                         isValidRoomId(roomId) &&
+                         isValidId(chunkId) &&
+                         incoming().chunkId == chunkId &&
+                         incoming().roomId == roomId &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['chunkId', 'roomId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         incoming().keys().hasOnly(['chunkId', 'roomId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         isValidChatVoiceChunk(incoming(), roomId) &&
+                         exists(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)) &&
+                         get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data.isInvisible == false &&
+                         (!('isVoiceMuted' in get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data) ||
+                          get(/databases/$(database)/documents/chat_rooms/$(roomId)/presence/$(request.auth.uid)).data.isVoiceMuted == false) && (
+                           (!isAccountRestricted() && !isChatBanned() && !isChatMuted() && !isBouncedFromRoom(roomId) && hasPaidOrTrialChatAccess()) ||
+                           isSupportOrAdmin()
+                         );
+
+        allow update, delete: if false;
+      }
+
+      match /bounces/{userId} {
+        allow get: if isSignedIn() && isValidRoomId(roomId) && isValidId(userId) &&
+                      (request.auth.uid == userId || isSupportOrAdmin() || isRoomMonitor(roomId));
+        allow list: if isSignedIn() && isValidRoomId(roomId) && isSupportOrAdmin();
+
+        allow create, update: if isValidRoomId(roomId) &&
+                                 isValidId(userId) &&
+                                 incoming().userId == userId &&
+                                 incoming().roomId == roomId &&
+                                 incoming().bouncedByUid == request.auth.uid &&
+                                 incoming().keys().hasAll(['roomId', 'userId', 'reason', 'bouncedByUid', 'bouncedUntil', 'bouncedAt']) &&
+                                 incoming().keys().hasOnly(['roomId', 'userId', 'reason', 'bouncedByUid', 'bouncedUntil', 'bouncedAt']) &&
+                                 isValidRoomBounce(incoming()) &&
+                                 (isSupportOrAdmin() || isRoomMonitor(roomId)) &&
+                                 !isTargetProtectedOwner(userId) &&
+                                 (!isTargetAdmin(userId) || isAdmin()) &&
+                                 (isSupportOrAdmin() || !isTargetStaff(userId));
+
+        allow delete: if isValidRoomId(roomId) && isValidId(userId) && (isSupportOrAdmin() || isRoomMonitor(roomId));
+      }
+    }
+
+    match /friend_requests/{pairId} {
+      allow get: if isSignedIn() && isValidId(pairId) &&
+                    (resource == null || request.auth.uid in existing().participantIds);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(pairId) &&
+                       incoming().pairId == pairId &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().keys().hasAll(['pairId', 'senderId', 'senderName', 'receiverId', 'receiverName', 'participantIds', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['pairId', 'senderId', 'senderName', 'receiverId', 'receiverName', 'participantIds', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidFriendRelationship(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(pairId) &&
+                       request.auth.uid in existing().participantIds &&
+                       incoming().pairId == existing().pairId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidFriendRelationship(incoming()) && (
+                         (existing().status == 'pending' &&
+                          existing().receiverId == request.auth.uid &&
+                          incoming().status in ['accepted', 'declined'] &&
+                          incoming().senderId == existing().senderId &&
+                          incoming().receiverId == existing().receiverId) ||
+                         (existing().status == 'declined' &&
+                          incoming().status == 'pending' &&
+                          incoming().senderId == request.auth.uid)
+                       );
+
+      allow delete: if isSignedIn() && isValidId(pairId) &&
+                       request.auth.uid in existing().participantIds;
+    }
+
+    match /direct_chats/{threadId} {
+      allow get: if isSignedIn() && isValidId(threadId) &&
+                    (resource == null || request.auth.uid in existing().participantIds);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(threadId) &&
+                       incoming().threadId == threadId &&
+                       request.auth.uid in incoming().participantIds &&
+                       incoming().keys().hasAll(['threadId', 'participantIds', 'participantNames', 'lastMessageText', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['threadId', 'participantIds', 'participantNames', 'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'createdAt', 'updatedAt']) &&
+                       isValidDirectChatThread(incoming()) &&
+                       hasPrivateChatAccess();
+
+      allow update: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(threadId) &&
+                       request.auth.uid in existing().participantIds &&
+                       incoming().threadId == existing().threadId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidDirectChatThread(incoming()) &&
+                       hasPrivateChatAccess() &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['participantNames', 'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'updatedAt']);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(threadId) && isValidId(messageId) && isDirectChatParticipant(threadId);
+        allow list: if isSignedIn() && isValidId(threadId) && isDirectChatParticipant(threadId);
+
+        allow create: if isSignedIn() &&
+                         !isAccountRestricted() &&
+                         isValidId(threadId) &&
+                         isValidId(messageId) &&
+                         isDirectChatParticipant(threadId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['threadId', 'senderId', 'senderName', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['threadId', 'senderId', 'senderName', 'text', 'messageType', 'snapBase64', 'snapDownloadUrl', 'snapStoragePath', 'snapDurationSeconds', 'viewedByIds', 'createdAt']) &&
+                         isValidDirectMessage(incoming(), threadId) &&
+                         hasPrivateChatAccess();
+
+        allow update: if isSignedIn() &&
+                         isValidId(threadId) &&
+                         isValidId(messageId) &&
+                         isDirectChatParticipant(threadId) &&
+                         ('messageType' in existing()) &&
+                         existing().messageType == 'snap' &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['viewedByIds']) &&
+                         incoming().viewedByIds is list &&
+                         incoming().viewedByIds.size() <= 2 &&
+                         request.auth.uid in incoming().viewedByIds &&
+                         (!('viewedByIds' in existing()) || incoming().viewedByIds.hasAll(existing().viewedByIds));
+
+        allow delete: if isSignedIn() && isValidId(threadId) && isValidId(messageId) &&
+                         isDirectChatParticipant(threadId) && existing().senderId == request.auth.uid;
+      }
+    }
+
+    match /group_chats/{groupId} {
+      allow get: if isSignedIn() && isValidId(groupId) &&
+                    (resource != null && request.auth.uid in existing().memberIds);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(groupId) &&
+                       incoming().groupId == groupId &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().keys().hasAll(['groupId', 'name', 'description', 'ownerId', 'memberIds', 'memberNames', 'privacyMode', 'allowMemberInvites', 'lastMessageText', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'name', 'description', 'ownerId', 'memberIds', 'memberNames', 'privacyMode', 'allowMemberInvites', 'lastMessageText', 'lastMessageAt', 'createdAt', 'updatedAt']) &&
+                       isValidPrivateGroupChat(incoming()) &&
+                       hasPrivateChatAccess();
+
+      allow update: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(groupId) &&
+                       request.auth.uid in existing().memberIds &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidPrivateGroupChat(incoming()) && (
+                         // Send message preview update (requires 5 tokens/week pass)
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['lastMessageText', 'lastMessageAt', 'updatedAt']) &&
+                          hasPrivateChatAccess()) ||
+                         // Group owner updates settings or members (requires 5 tokens/week pass)
+                         (existing().ownerId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'memberIds', 'memberNames', 'privacyMode', 'allowMemberInvites', 'updatedAt']) &&
+                          hasPrivateChatAccess()) ||
+                         // Member invites friends when allowMemberInvites is enabled (requires 5 tokens/week pass)
+                         (existing().allowMemberInvites == true &&
+                          incoming().memberIds.hasAll(existing().memberIds) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'memberNames', 'updatedAt']) &&
+                          hasPrivateChatAccess()) ||
+                         // Any non-owner member leaves the group
+                         (existing().ownerId != request.auth.uid &&
+                          !(request.auth.uid in incoming().memberIds) &&
+                          existing().memberIds.hasAll(incoming().memberIds) &&
+                          incoming().memberIds.size() == existing().memberIds.size() - 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'memberNames', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(groupId) && existing().ownerId == request.auth.uid;
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(groupId) && isValidId(messageId) && isGroupChatMember(groupId);
+        allow list: if isSignedIn() && isValidId(groupId) && isGroupChatMember(groupId);
+
+        allow create: if isSignedIn() &&
+                         !isAccountRestricted() &&
+                         isValidId(groupId) &&
+                         isValidId(messageId) &&
+                         isGroupChatMember(groupId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['groupId', 'senderId', 'senderName', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['groupId', 'senderId', 'senderName', 'text', 'createdAt']) &&
+                         isValidGroupMessage(incoming(), groupId) &&
+                         hasPrivateChatAccess();
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(groupId) && isValidId(messageId) &&
+                         isGroupChatMember(groupId) && (
+                           existing().senderId == request.auth.uid ||
+                           get(/databases/$(database)/documents/group_chats/$(groupId)).data.ownerId == request.auth.uid
+                         );
+      }
+    }
+
+    function isValidBlockedUser(data, userId, blockedUserId) {
+      return data.userId == userId &&
+             data.blockedUserId == blockedUserId &&
+             data.blockedUserName is string &&
+             data.blockedUserName.size() >= 1 &&
+             data.blockedUserName.size() <= 60 &&
+             (!('reason' in data) || data.reason == null || (data.reason is string && data.reason.size() <= 160)) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isSupportOrAdmin());
+      allow list: if isSupportOrAdmin();
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().displayName is string &&
+                       incoming().displayName.size() >= 1 && incoming().displayName.size() <= 60 &&
+                       (!('bio' in incoming()) || incoming().bio == null || (incoming().bio is string && incoming().bio.size() <= 240)) &&
+                       (!('age' in incoming()) || incoming().age == null || (incoming().age is int && incoming().age >= 18 && incoming().age <= 110)) &&
+                       (!('sex' in incoming()) || incoming().sex == null || incoming().sex in ['female', 'male', 'non_binary', 'unspecified']) &&
+                       incoming().voteBalance == 100 &&
+                       (!('paidVoteBalance' in incoming()) || incoming().paidVoteBalance == 0) &&
+                       incoming().totalVotesCast == 0 &&
+                       incoming().totalVotesPurchased == 0 &&
+                       (!('role' in incoming()) || incoming().role == 'user') &&
+                       (!('chatAccessExpiresAt' in incoming()) || incoming().chatAccessExpiresAt == null) &&
+                       (!('privateChatAccessExpiresAt' in incoming()) || incoming().privateChatAccessExpiresAt == null) &&
+                       (!('phoneTokenBalance' in incoming()) || incoming().phoneTokenBalance == 0) &&
+                       (!('totalPhoneTokensPurchased' in incoming()) || incoming().totalPhoneTokensPurchased == 0) &&
+                       (!('lastRefundedSessionId' in incoming()) || incoming().lastRefundedSessionId == null) &&
+                       (!('videoTokenBalance' in incoming()) || incoming().videoTokenBalance == 0) &&
+                       (!('totalVideoTokensPurchased' in incoming()) || incoming().totalVideoTokensPurchased == 0) &&
+                       (!('lastRefundedVideoSessionId' in incoming()) || incoming().lastRefundedVideoSessionId == null) &&
+                       (!('supportStartedAt' in incoming()) || incoming().supportStartedAt == null) &&
+                       (!('lastSupportPayClaimAt' in incoming()) || incoming().lastSupportPayClaimAt == null) &&
+                       (!('totalSupportPayTokensEarned' in incoming()) || incoming().totalSupportPayTokensEarned == 0) &&
+                       (!('referralCode' in incoming()) || incoming().referralCode == null || isValidReferralCode(incoming().referralCode)) &&
+                       (!('referralCashableBalance' in incoming()) || incoming().referralCashableBalance == 0) &&
+                       (!('totalReferralTokensEarned' in incoming()) || incoming().totalReferralTokensEarned == 0) &&
+                       (!('totalReferralTokensCashedIn' in incoming()) || incoming().totalReferralTokensCashedIn == 0) &&
+                       (!('lastReferralClaimId' in incoming()) || incoming().lastReferralClaimId == null) &&
+                       (!('lastReferralCashoutId' in incoming()) || incoming().lastReferralCashoutId == null) &&
+                       (!('email' in incoming()) || incoming().email == null || (hasVerifiedEmail() && incoming().email.size() <= 128 && incoming().email == request.auth.token.email.lower())) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'voteBalance', 'totalVotesCast', 'totalVotesPurchased', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'email', 'displayName', 'bio', 'age', 'sex', 'role', 'voteBalance', 'paidVoteBalance', 'totalVotesCast', 'totalVotesPurchased', 'chatAccessExpiresAt', 'privateChatAccessExpiresAt', 'phoneTokenBalance', 'totalPhoneTokensPurchased', 'lastRefundedSessionId', 'videoTokenBalance', 'totalVideoTokensPurchased', 'lastRefundedVideoSessionId', 'supportStartedAt', 'lastSupportPayClaimAt', 'totalSupportPayTokensEarned', 'referralCode', 'referralCashableBalance', 'totalReferralTokensEarned', 'totalReferralTokensCashedIn', 'lastReferralClaimId', 'lastReferralCashoutId', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp &&
+                       incoming().updatedAt <= request.time && (
+                         (
+                           request.auth.uid == userId &&
+                           ((!('role' in incoming()) && !('role' in existing())) ||
+                            (('role' in incoming()) && ('role' in existing()) && incoming().role == existing().role)) &&
+                           isSelfUserUpdateAllowed(incoming(), existing(), incoming().diff(existing()).affectedKeys())
+                         ) ||
+                         (isAdmin() &&
+                          isValidUserProfile(incoming()) &&
+                          (!('email' in existing()) || existing().email != 'daj18801@gmail.com' || incoming().role == existing().role))
+                       );
+
+      allow delete: if false;
+
+      match /unlocks/{creatorId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(creatorId) && (request.auth.uid == userId || isAdmin());
+        allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(creatorId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().creatorId == creatorId &&
+                         incoming().keys().hasAll(['userId', 'creatorId', 'votesSpent', 'unlockedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'creatorId', 'votesSpent', 'unlockedAt']) &&
+                         isValidCreatorUnlock(incoming()) &&
+                         exists(/databases/$(database)/documents/creators/$(creatorId));
+
+        allow update, delete: if false;
+      }
+
+      match /purchases/{purchaseId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(purchaseId) && (request.auth.uid == userId || isAdmin());
+        allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(purchaseId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'packId', 'packTitle', 'votesAdded', 'priceLabel', 'purchasedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'packId', 'packTitle', 'votesAdded', 'priceLabel', 'purchasedAt']) &&
+                         isValidVotePurchase(incoming());
+
+        allow update, delete: if false;
+      }
+
+      match /phone_purchases/{purchaseId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(purchaseId) && (request.auth.uid == userId || isAdmin());
+        allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(purchaseId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'packId', 'packTitle', 'tokensAdded', 'priceLabel', 'purchasedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'packId', 'packTitle', 'tokensAdded', 'priceLabel', 'purchasedAt']) &&
+                         isValidPhoneTokenPurchase(incoming());
+
+        allow update, delete: if false;
+      }
+
+      match /video_purchases/{purchaseId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(purchaseId) && (request.auth.uid == userId || isAdmin());
+        allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(purchaseId) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'packId', 'packTitle', 'tokensAdded', 'priceLabel', 'purchasedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'packId', 'packTitle', 'tokensAdded', 'priceLabel', 'purchasedAt']) &&
+                         isValidVideoTokenPurchase(incoming());
+
+        allow update, delete: if false;
+      }
+
+      match /blocked_users/{blockedUserId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(blockedUserId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(blockedUserId) &&
+                         request.auth.uid == userId &&
+                         blockedUserId != userId &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().blockedUserId == blockedUserId &&
+                         incoming().keys().hasAll(['userId', 'blockedUserId', 'blockedUserName', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'blockedUserId', 'blockedUserName', 'reason', 'createdAt']) &&
+                         isValidBlockedUser(incoming(), userId, blockedUserId);
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(blockedUserId) && request.auth.uid == userId;
+      }
+    }
+
+    match /creator_payouts/{payoutId} {
+      allow get: if isSignedIn() && isValidId(payoutId) &&
+                    (resource != null && (existing().creatorId == request.auth.uid || existing().payerId == request.auth.uid || isAdmin()));
+      allow list: if isSignedIn() &&
+                     (resource.data.creatorId == request.auth.uid || resource.data.payerId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(payoutId) &&
+                       incoming().payoutId == payoutId &&
+                       incoming().keys().hasAll(['payoutId', 'creatorId', 'payerId', 'payerName', 'sourceType', 'sourceId', 'grossTokens', 'creatorSharePercent', 'creatorShareCents', 'createdAt']) &&
+                       incoming().keys().hasOnly(['payoutId', 'creatorId', 'payerId', 'payerName', 'sourceType', 'sourceId', 'grossTokens', 'creatorSharePercent', 'creatorShareCents', 'createdAt']) &&
+                       isValidCreatorPayout(incoming()) && (
+                         (incoming().sourceType == 'gallery_unlock' &&
+                          incoming().payerId == request.auth.uid &&
+                          incoming().sourceId == incoming().creatorId &&
+                          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                          ('paidVoteBalance' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) &&
+                          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.paidVoteBalance >= incoming().grossTokens &&
+                          getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.paidVoteBalance == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.paidVoteBalance - incoming().grossTokens &&
+                          getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.voteBalance == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.voteBalance - incoming().grossTokens &&
+                          getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/unlocks/$(incoming().creatorId)).data.creatorId == incoming().creatorId &&
+                          getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/unlocks/$(incoming().creatorId)).data.votesSpent == incoming().grossTokens) ||
+                         (incoming().sourceType == 'mic_call' &&
+                          incoming().creatorId == request.auth.uid &&
+                          isValidId(incoming().sourceId) &&
+                          exists(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)) &&
+                          get(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)).data.creatorId == request.auth.uid &&
+                          get(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)).data.requesterId == incoming().payerId &&
+                          get(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)).data.escrowStatus == 'held' &&
+                          getAfter(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)).data.escrowStatus == 'released' &&
+                          incoming().grossTokens == get(/databases/$(database)/documents/mic_sessions/$(incoming().sourceId)).data.totalTokensCost) ||
+                         (incoming().sourceType == 'video_call' &&
+                          incoming().creatorId == request.auth.uid &&
+                          isValidId(incoming().sourceId) &&
+                          exists(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)) &&
+                          get(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)).data.creatorId == request.auth.uid &&
+                          get(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)).data.requesterId == incoming().payerId &&
+                          get(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)).data.escrowStatus == 'held' &&
+                          getAfter(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)).data.escrowStatus == 'released' &&
+                          incoming().grossTokens == get(/databases/$(database)/documents/video_sessions/$(incoming().sourceId)).data.totalTokensCost)
+                       );
+
+      allow update, delete: if false;
+    }
+
+    match /mic_sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId) &&
+                    (resource == null || request.auth.uid in existing().participantIds);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(sessionId) &&
+                       incoming().sessionId == sessionId &&
+                       incoming().requesterId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().escrowStatus == 'free' &&
+                       incoming().keys().hasAll(['sessionId', 'requesterId', 'requesterName', 'creatorId', 'creatorName', 'participantIds', 'topic', 'scheduledForMillis', 'durationMinutes', 'tokensPerMinute', 'totalTokensCost', 'creatorShareTokens', 'creatorShareCents', 'status', 'escrowStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['sessionId', 'requesterId', 'requesterName', 'creatorId', 'creatorName', 'participantIds', 'topic', 'scheduledForMillis', 'durationMinutes', 'tokensPerMinute', 'totalTokensCost', 'creatorShareTokens', 'creatorShareCents', 'status', 'escrowStatus', 'createdAt', 'updatedAt']) &&
+                       isValidMicSession(incoming()) &&
+                       exists(/databases/$(database)/documents/creators/$(incoming().creatorId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       request.auth.uid in existing().participantIds &&
+                       incoming().sessionId == existing().sessionId &&
+                       incoming().requesterId == existing().requesterId &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().durationMinutes == existing().durationMinutes &&
+                       incoming().totalTokensCost == existing().totalTokensCost &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidMicSession(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'escrowStatus', 'updatedAt']) && (
+                         // Creator accepts free mic request
+                         (request.auth.uid == existing().creatorId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'accepted' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Creator declines free mic request
+                         (request.auth.uid == existing().creatorId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'declined' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Requester cancels pending free mic request
+                         (request.auth.uid == existing().requesterId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'cancelled' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Either participant joins / finishes an accepted free call
+                         (existing().status == 'accepted' &&
+                          incoming().status == 'active' &&
+                          incoming().escrowStatus == 'free') ||
+                         (existing().status in ['accepted', 'active'] &&
+                          incoming().status == 'completed' &&
+                          incoming().escrowStatus == 'free')
+                       );
+
+      allow delete: if false;
+
+      match /audio_chunks/{chunkId} {
+        allow get: if isSignedIn() && isValidId(sessionId) && isValidId(chunkId) && isMicSessionParticipant(sessionId);
+        allow list: if isSignedIn() && isValidId(sessionId) && isMicSessionParticipant(sessionId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(sessionId) &&
+                         isValidId(chunkId) &&
+                         isMicSessionParticipant(sessionId) &&
+                         isMicSessionCallable(sessionId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['chunkId', 'sessionId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         incoming().keys().hasOnly(['chunkId', 'sessionId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         isValidMicAudioChunk(incoming(), sessionId);
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /video_sessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId) &&
+                    (resource == null || request.auth.uid in existing().participantIds);
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(sessionId) &&
+                       incoming().sessionId == sessionId &&
+                       incoming().requesterId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().escrowStatus == 'free' &&
+                       incoming().keys().hasAll(['sessionId', 'threadId', 'requesterId', 'requesterName', 'creatorId', 'creatorName', 'participantIds', 'note', 'durationMinutes', 'tokensPerMinute', 'totalTokensCost', 'creatorShareTokens', 'creatorShareCents', 'status', 'escrowStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['sessionId', 'threadId', 'requesterId', 'requesterName', 'creatorId', 'creatorName', 'participantIds', 'note', 'durationMinutes', 'tokensPerMinute', 'totalTokensCost', 'creatorShareTokens', 'creatorShareCents', 'status', 'escrowStatus', 'createdAt', 'updatedAt']) &&
+                       isValidVideoSession(incoming()) &&
+                       exists(/databases/$(database)/documents/creators/$(incoming().creatorId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       request.auth.uid in existing().participantIds &&
+                       incoming().sessionId == existing().sessionId &&
+                       incoming().threadId == existing().threadId &&
+                       incoming().requesterId == existing().requesterId &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().durationMinutes == existing().durationMinutes &&
+                       incoming().totalTokensCost == existing().totalTokensCost &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidVideoSession(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'escrowStatus', 'updatedAt']) && (
+                         // Creator accepts free video request
+                         (request.auth.uid == existing().creatorId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'accepted' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Creator declines free video request
+                         (request.auth.uid == existing().creatorId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'declined' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Requester cancels pending free video request
+                         (request.auth.uid == existing().requesterId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'cancelled' &&
+                          incoming().escrowStatus == 'free') ||
+                         // Either participant joins / finishes an accepted free video session
+                         (existing().status == 'accepted' &&
+                          incoming().status == 'active' &&
+                          incoming().escrowStatus == 'free') ||
+                         (existing().status in ['accepted', 'active'] &&
+                          incoming().status == 'completed' &&
+                          incoming().escrowStatus == 'free')
+                       );
+
+      allow delete: if false;
+
+      match /video_frames/{frameId} {
+        allow get: if isSignedIn() && isValidId(sessionId) && isValidId(frameId) && isVideoSessionParticipant(sessionId);
+        allow list: if isSignedIn() && isValidId(sessionId) && isVideoSessionParticipant(sessionId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(sessionId) &&
+                         isValidId(frameId) &&
+                         isVideoSessionParticipant(sessionId) &&
+                         isVideoSessionCallable(sessionId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['frameId', 'sessionId', 'senderId', 'senderName', 'frameBase64', 'width', 'height', 'sequenceNumber', 'createdAt']) &&
+                         incoming().keys().hasOnly(['frameId', 'sessionId', 'senderId', 'senderName', 'frameBase64', 'width', 'height', 'sequenceNumber', 'createdAt']) &&
+                         isValidVideoFrameChunk(incoming(), sessionId);
+
+        allow update, delete: if false;
+      }
+
+      match /audio_chunks/{chunkId} {
+        allow get: if isSignedIn() && isValidId(sessionId) && isValidId(chunkId) && isVideoSessionParticipant(sessionId);
+        allow list: if isSignedIn() && isValidId(sessionId) && isVideoSessionParticipant(sessionId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(sessionId) &&
+                         isValidId(chunkId) &&
+                         isVideoSessionParticipant(sessionId) &&
+                         isVideoSessionCallable(sessionId) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().keys().hasAll(['chunkId', 'sessionId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         incoming().keys().hasOnly(['chunkId', 'sessionId', 'senderId', 'senderName', 'sampleRate', 'audioBase64', 'durationMs', 'sequenceNumber', 'createdAt']) &&
+                         isValidMicAudioChunk(incoming(), sessionId);
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /creators/{creatorId} {
+      allow get: if isSignedIn() && isValidId(creatorId) &&
+                    (request.auth.uid == creatorId || (resource != null && existing().visibility == 'public') || isSupportOrAdmin());
+      allow list: if isSignedIn() && (resource.data.visibility == 'public' || isSupportOrAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(creatorId) &&
+                       request.auth.uid == creatorId &&
+                       incoming().creatorId == request.auth.uid &&
+                       incoming().totalVotesReceived == 0 &&
+                       incoming().visibility == 'public' &&
+                       incoming().keys().hasAll(['creatorId', 'displayName', 'visibility', 'postCount', 'totalVotesReceived', 'freePreviewLimit', 'unlockCostVotes', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['creatorId', 'displayName', 'bio', 'age', 'sex', 'visibility', 'postCount', 'totalVotesReceived', 'freePreviewLimit', 'unlockCostVotes', 'isOnline', 'lastSeenAt', 'createdAt', 'updatedAt']) &&
+                       isValidCreatorSummary(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(creatorId) &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidCreatorSummary(incoming()) && (
+                         (request.auth.uid == creatorId &&
+                          incoming().totalVotesReceived == existing().totalVotesReceived &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'bio', 'age', 'sex', 'postCount', 'freePreviewLimit', 'unlockCostVotes', 'visibility', 'isOnline', 'lastSeenAt', 'updatedAt'])) ||
+                         (incoming().totalVotesReceived == existing().totalVotesReceived + 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['totalVotesReceived', 'updatedAt'])) ||
+                         isAdmin()
+                       );
+
+      allow delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId) &&
+                    ((resource != null && (existing().visibility == 'public' || existing().creatorId == request.auth.uid)) || isSupportOrAdmin());
+      allow list: if isSignedIn() && (resource.data.visibility == 'public' || isSupportOrAdmin());
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(postId) &&
+                       incoming().creatorId == request.auth.uid &&
+                       incoming().voteCount == 0 &&
+                       incoming().visibility == 'public' &&
+                       incoming().keys().hasAll(['creatorId', 'creatorName', 'mediaType', 'caption', 'mediaBase64', 'durationMs', 'postIndex', 'voteCount', 'visibility', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['creatorId', 'creatorName', 'mediaType', 'caption', 'mediaBase64', 'mediaDownloadUrl', 'storagePath', 'localVideoFileName', 'durationMs', 'postIndex', 'voteCount', 'visibility', 'createdAt', 'updatedAt']) &&
+                       isValidMediaPost(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(postId) &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidMediaPost(incoming()) && (
+                         (existing().creatorId == request.auth.uid &&
+                          incoming().voteCount == existing().voteCount &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'visibility', 'updatedAt'])) ||
+                         (incoming().voteCount == existing().voteCount + 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['voteCount', 'updatedAt'])) ||
+                         (isSupportOrAdmin() &&
+                          incoming().voteCount == existing().voteCount &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['visibility', 'updatedAt'])) ||
+                         isAdmin()
+                       );
+
+      allow delete: if isSignedIn() && isValidId(postId) &&
+                       (existing().creatorId == request.auth.uid || isSupportOrAdmin());
+
+      match /votes/{voterId} {
+        allow get: if isSignedIn() && isValidId(postId) && isValidId(voterId) && (request.auth.uid == voterId || isAdmin());
+        allow list: if isSignedIn() && isValidId(postId) && (resource.data.voterId == request.auth.uid || isAdmin());
+
+        allow create: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(voterId) &&
+                         request.auth.uid == voterId &&
+                         incoming().voterId == request.auth.uid &&
+                         incoming().postId == postId &&
+                         incoming().votesCast == 1 &&
+                         incoming().keys().hasAll(['postId', 'voterId', 'votesCast', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['postId', 'voterId', 'votesCast', 'createdAt', 'updatedAt']) &&
+                         isValidPostVoteRecord(incoming()) &&
+                         exists(/databases/$(database)/documents/posts/$(postId));
+
+        allow update: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(voterId) &&
+                         request.auth.uid == voterId &&
+                         incoming().voterId == existing().voterId &&
+                         incoming().postId == existing().postId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().votesCast == existing().votesCast + 1 &&
+                         isValidPostVoteRecord(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['votesCast', 'updatedAt']);
+
+        allow delete: if false;
+      }
+    }
+
+    // --- REFERRAL PROGRAM: CODES, PAYING REFERRAL TRACKING, 10 -> 100 TOKEN REWARDS & CASH-IN ---
+
+    match /referral_codes/{code} {
+      allow get: if isSignedIn() && isValidReferralCode(code);
+      allow list: if isAdmin();
+
+      allow create: if isSignedIn() &&
+                       isValidReferralCode(code) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().keys().hasAll(['code', 'ownerId', 'ownerName', 'createdAt']) &&
+                       incoming().keys().hasOnly(['code', 'ownerId', 'ownerName', 'createdAt']) &&
+                       isValidReferralCodeEntry(incoming(), code);
+
+      allow update, delete: if false;
+    }
+
+    match /referrals/{referredUserId} {
+      allow get: if isSignedIn() && isValidId(referredUserId) &&
+                    (request.auth.uid == referredUserId ||
+                     isAdmin() ||
+                     (resource != null && existing().referrerId == request.auth.uid));
+      allow list: if isAdmin() ||
+                     (isSignedIn() &&
+                      (resource.data.referrerId == request.auth.uid || resource.data.referredUserId == request.auth.uid));
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(referredUserId) &&
+                       request.auth.uid == referredUserId &&
+                       incoming().referredUserId == request.auth.uid &&
+                       incoming().referrerId != request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().rewardClaimed == false &&
+                       (!('qualifyingPurchaseType' in incoming()) || incoming().qualifyingPurchaseType == null) &&
+                       (!('qualifyingPurchaseId' in incoming()) || incoming().qualifyingPurchaseId == null) &&
+                       (!('rewardClaimId' in incoming()) || incoming().rewardClaimId == null) &&
+                       (!('qualifiedAt' in incoming()) || incoming().qualifiedAt == null) &&
+                       (!('claimedAt' in incoming()) || incoming().claimedAt == null) &&
+                       incoming().keys().hasAll(['referredUserId', 'referredUserName', 'referrerId', 'referrerName', 'referralCode', 'status', 'rewardClaimed', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['referredUserId', 'referredUserName', 'referrerId', 'referrerName', 'referralCode', 'status', 'qualifyingPurchaseType', 'qualifyingPurchaseId', 'rewardClaimed', 'rewardClaimId', 'qualifiedAt', 'claimedAt', 'createdAt', 'updatedAt']) &&
+                       isValidReferralRecord(incoming()) &&
+                       exists(/databases/$(database)/documents/referral_codes/$(incoming().referralCode)) &&
+                       get(/databases/$(database)/documents/referral_codes/$(incoming().referralCode)).data.ownerId == incoming().referrerId;
+
+      allow update: if isSignedIn() &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time && (
+                         // Referrer marks qualified referral as claimed once (minimal expressions for 10-doc batch)
+                         (request.auth.uid == existing().referrerId &&
+                          existing().status == 'qualified' &&
+                          existing().rewardClaimed == false &&
+                          incoming().rewardClaimed == true &&
+                          incoming().rewardClaimId is string &&
+                          incoming().rewardClaimId.size() >= 1 && incoming().rewardClaimId.size() <= 128 &&
+                          incoming().claimedAt is timestamp &&
+                          incoming().claimedAt <= request.time &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['rewardClaimed', 'rewardClaimId', 'claimedAt', 'updatedAt'])) ||
+                         // Referred user qualifies referral atomically on any token pack purchase
+                         (request.auth.uid == referredUserId &&
+                          existing().status == 'pending' &&
+                          incoming().status == 'qualified' &&
+                          incoming().rewardClaimed == false &&
+                          incoming().qualifyingPurchaseType in ['vote_pack', 'phone_pack', 'video_pack'] &&
+                          isValidId(incoming().qualifyingPurchaseId) &&
+                          incoming().qualifiedAt is timestamp &&
+                          incoming().qualifiedAt <= request.time &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'qualifyingPurchaseType', 'qualifyingPurchaseId', 'qualifiedAt', 'updatedAt']) && (
+                            (incoming().qualifyingPurchaseType == 'vote_pack' &&
+                             existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/purchases/$(incoming().qualifyingPurchaseId))) ||
+                            (incoming().qualifyingPurchaseType == 'phone_pack' &&
+                             existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/phone_purchases/$(incoming().qualifyingPurchaseId))) ||
+                            (incoming().qualifyingPurchaseType == 'video_pack' &&
+                             existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/video_purchases/$(incoming().qualifyingPurchaseId)))
+                          ))
+                       );
+
+      allow delete: if false;
+    }
+
+    match /referral_claims/{claimId} {
+      allow get: if isSignedIn() && isValidId(claimId) &&
+                    ((resource != null && existing().referrerId == request.auth.uid) || isAdmin());
+      allow list: if isAdmin() ||
+                     (isSignedIn() && resource.data.referrerId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(claimId) &&
+                       incoming().referrerId == request.auth.uid &&
+                       incoming().keys().hasAll(['claimId', 'referrerId', 'referrerName', 'qualifiedReferralIds', 'referralCountRequired', 'tokensAwarded', 'cashValueCents', 'createdAt']) &&
+                       incoming().keys().hasOnly(['claimId', 'referrerId', 'referrerName', 'qualifiedReferralIds', 'referralCountRequired', 'tokensAwarded', 'cashValueCents', 'createdAt']) &&
+                       isValidReferralClaim(incoming(), claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[0], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[1], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[2], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[3], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[4], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[5], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[6], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[7], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[8], claimId) &&
+                       isClaimedReferralValid(incoming().qualifiedReferralIds[9], claimId);
+
+      allow update, delete: if false;
+    }
+
+    match /referral_cashouts/{cashoutId} {
+      allow get: if isSignedIn() && isValidId(cashoutId) &&
+                    ((resource != null && existing().userId == request.auth.uid) || isAdmin());
+      allow list: if isAdmin() ||
+                     (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(cashoutId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'submitted' &&
+                       incoming().keys().hasAll(['cashoutId', 'userId', 'userName', 'tokensCashedIn', 'usdCents', 'payoutMethod', 'payoutDestination', 'status', 'createdAt']) &&
+                       incoming().keys().hasOnly(['cashoutId', 'userId', 'userName', 'tokensCashedIn', 'usdCents', 'payoutMethod', 'payoutDestination', 'status', 'createdAt']) &&
+                       isValidReferralCashout(incoming(), cashoutId) &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                       getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.lastReferralCashoutId == cashoutId &&
+                       getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.referralCashableBalance ==
+                         (('referralCashableBalance' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.referralCashableBalance is int)
+                           ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.referralCashableBalance
+                           : 0) - incoming().tokensCashedIn;
+
+      allow update, delete: if false;
+    }
+
+    // --- STORIES (24H PHOTO SNAP OR TEXT MESSAGE) & OPTIONAL USER CHECK-INS ---
+
+    match /stories/{storyId} {
+      allow get: if isSignedIn() && isValidId(storyId);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       !isAccountRestricted() &&
+                       isValidId(storyId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().viewCount == 0 &&
+                       incoming().expiresAt > request.time &&
+                       incoming().expiresAt <= request.time + duration.value(24, 'h') + duration.value(5, 'm') &&
+                       incoming().keys().hasAll(['storyId', 'userId', 'userName', 'storyType', 'text', 'backgroundStyle', 'viewCount', 'expiresAt', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['storyId', 'userId', 'userName', 'storyType', 'text', 'mediaBase64', 'mediaDownloadUrl', 'storagePath', 'backgroundStyle', 'viewCount', 'expiresAt', 'createdAt', 'updatedAt']) &&
+                       isValidStory(incoming(), storyId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       incoming().storyId == existing().storyId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidStory(incoming(), storyId) && (
+                         (incoming().viewCount == existing().viewCount + 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['viewCount', 'updatedAt'])) ||
+                         (existing().userId == request.auth.uid &&
+                          incoming().viewCount == existing().viewCount &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(storyId) &&
+                       (existing().userId == request.auth.uid || isSupportOrAdmin());
+    }
+
+    match /check_ins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+
+      allow create, update: if isSignedIn() &&
+                               !isAccountRestricted() &&
+                               isValidId(userId) &&
+                               request.auth.uid == userId &&
+                               incoming().expiresAt > request.time &&
+                               incoming().expiresAt <= request.time + duration.value(24, 'h') + duration.value(5, 'm') &&
+                               incoming().keys().hasAll(['userId', 'userName', 'placeLabel', 'statusNote', 'vibeTag', 'expiresAt', 'createdAt', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['userId', 'userName', 'placeLabel', 'statusNote', 'vibeTag', 'expiresAt', 'createdAt', 'updatedAt']) &&
+                               isValidCheckIn(incoming(), userId);
+
+      allow delete: if isSignedIn() && isValidId(userId) &&
+                       (request.auth.uid == userId || isSupportOrAdmin());
+    }
+
+    // --- ADMIN BROADCAST ALERTS & NEWS + STAFF WARNING POPUPS ---
+
+    match /admin_announcements/{announcementId} {
+      allow get: if isSignedIn() && isValidId(announcementId);
+      allow list: if isSignedIn();
+
+      allow create: if isAdmin() &&
+                       isValidId(announcementId) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().keys().hasAll(['announcementId', 'category', 'title', 'message', 'senderId', 'senderName', 'senderRole', 'createdAt']) &&
+                       incoming().keys().hasOnly(['announcementId', 'category', 'title', 'message', 'senderId', 'senderName', 'senderRole', 'createdAt']) &&
+                       isValidAdminAnnouncement(incoming(), announcementId);
+
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(announcementId);
+    }
+
+    match /user_warnings/{warningId} {
+      allow get: if isSignedIn() && isValidId(warningId) &&
+                    (isSupportOrAdmin() || (resource != null && existing().targetUserId == request.auth.uid));
+      allow list: if isSupportOrAdmin() ||
+                     (isSignedIn() && resource.data.targetUserId == request.auth.uid);
+
+      allow create: if isSupportOrAdmin() &&
+                       isValidId(warningId) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().acknowledged == false &&
+                       (!('acknowledgedAt' in incoming()) || incoming().acknowledgedAt == null) &&
+                       !isTargetProtectedOwner(incoming().targetUserId) &&
+                       (isAdmin() || !isTargetAdmin(incoming().targetUserId)) &&
+                       incoming().keys().hasAll(['warningId', 'targetUserId', 'targetUserName', 'senderId', 'senderName', 'senderRole', 'severity', 'title', 'message', 'acknowledged', 'createdAt']) &&
+                       incoming().keys().hasOnly(['warningId', 'targetUserId', 'targetUserName', 'senderId', 'senderName', 'senderRole', 'severity', 'title', 'message', 'acknowledged', 'acknowledgedAt', 'createdAt']) &&
+                       isValidUserWarning(incoming(), warningId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(warningId) &&
+                       existing().targetUserId == request.auth.uid &&
+                       existing().acknowledged == false &&
+                       incoming().acknowledged == true &&
+                       incoming().acknowledgedAt is timestamp &&
+                       incoming().acknowledgedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['acknowledged', 'acknowledgedAt']);
+
+      allow delete: if isAdmin() && isValidId(warningId);
+    }
+  }
+}

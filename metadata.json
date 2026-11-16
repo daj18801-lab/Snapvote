@@ -1,0 +1,6 @@
+{
+  "name": "SnapVote",
+  "description": "Share photos and videos, vote on creator posts, and buy votes to unlock full creator galleries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

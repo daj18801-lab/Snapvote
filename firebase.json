@@ -1,0 +1,21 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-android-snapvote-86767d2e-4ded-469e-9d23-828dd8f78494",
+      "rules": "firestore.rules"
+    }
+  ],
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8085
+    },
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "ui": {
+      "enabled": false
+    }
+  }
+}

@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">SnapVote</string>
+    <string name="creator_analytics_title">Creator Analytics</string>
+    <string name="blocked_users_title">Blocked Users</string>
+    <string name="private_messages_title">Private Messages</string>
+</resources>
