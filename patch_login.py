@@ -47,7 +47,7 @@ else:
         f.write(f"""{{
   "project_info": {{
     "project_number": "123456789000",
-    "project_id": "snapvote-placeholder",
+    "project_id": "snapvote-3a283",
     "storage_bucket": "snapvote-placeholder.appspot.com"
   }},
   "client": [
