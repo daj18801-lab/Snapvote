@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "97184748312",
+    "project_id": "snapvote-3a283",
+    "storage_bucket": "snapvote-3a283.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:97184748312:android:a1afc546c8aec7b99a846d",
+        "android_client_info": {
+          "package_name": "com.aistudio.snapvote.kxmzqr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDS_HEXqpWHv3N_1cHXvc9Ey37br8mYpN0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
