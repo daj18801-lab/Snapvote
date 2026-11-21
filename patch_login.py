@@ -56,7 +56,7 @@ if not os.path.exists(gs_path):
 }}
 """)
 
-# 3. Cleanly bypass Google Sign-In in GoogleAuthHelper.kt with valid Kotlin types
+# 3. Patch GoogleAuthHelper.kt with exact String return type for idToken
 auth_files = glob.glob("**/GoogleAuthHelper.kt", recursive=True)
 for auth_file in auth_files:
     with open(auth_file, "r", encoding="utf-8") as f:
@@ -66,7 +66,6 @@ for auth_file in auth_files:
     skip_until_close = 0
 
     for line in lines:
-        # Match multi-line credentialManager.getCredential(...) and keep `val result` valid
         if "credentialManager.getCredential(" in line:
             indent = line[:len(line) - len(line.lstrip())]
             var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
@@ -82,19 +81,19 @@ for auth_file in auth_files:
             skip_until_close += line.count("(") - line.count(")")
             continue
 
-        # Replace GoogleIdTokenCredential.createFrom(...) with a real GoogleIdTokenCredential instance
+        # Return a String ("guest_id_token") directly where GoogleIdTokenCredential.createFrom(...) was used
         if "GoogleIdTokenCredential.createFrom(" in line:
             indent = line[:len(line) - len(line.lstrip())]
-            var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
-            var_name = var_match.group(1) if var_match else "googleIdTokenCredential"
-            new_lines.append(
-                f'{indent}val {var_name} = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential('
-                f'"guest@snapvote.app", "guest_id_token", "Guest User", null, null, null, null)\n'
-            )
+            var_match = re.match(r'\s*val\s+(\w+)[^=]*=', line)
+            if var_match:
+                var_name = var_match.group(1)
+                new_lines.append(f'{indent}val {var_name}: String? = "guest_id_token"\n')
+            else:
+                new_lines.append(re.sub(r'GoogleIdTokenCredential\.createFrom\([^)]*\)', '"guest_id_token"', line))
             continue
 
         new_lines.append(line)
 
     with open(auth_file, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
-    print(f"Successfully patched {auth_file} with valid Kotlin types")
+    print(f"Successfully patched {auth_file}")
