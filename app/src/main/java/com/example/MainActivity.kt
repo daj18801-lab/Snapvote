@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -64,7 +65,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
-import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -73,14 +73,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import android.content.Context
 import com.example.auth.authStateFlow
 import com.example.auth.signOutUser
 import com.example.data.model.CreatorSummary
 import com.example.data.model.EffectiveStaffTier
 import com.example.data.model.MediaPost
 import com.example.data.model.SupportTicket
-import com.example.data.model.UserCheckIn
 import com.example.data.model.UserStory
 import com.example.data.repository.SnapVoteRepository
 import com.example.ui.components.BuyPhoneTokensBottomSheet
@@ -90,7 +88,6 @@ import com.example.ui.components.CheckInDialog
 import com.example.ui.components.CreateStoryDialog
 import com.example.ui.components.GlobalAnnouncementPopupDialog
 import com.example.ui.components.MediaViewerDialog
-import com.example.ui.components.PhoneTokenBalanceChip
 import com.example.ui.components.ReportPostDialog
 import com.example.ui.components.RequestPrivateVideoDialog
 import com.example.ui.components.ScheduleMicSessionDialog
@@ -98,7 +95,6 @@ import com.example.ui.components.SendUserWarningDialog
 import com.example.ui.components.StoryViewerDialog
 import com.example.ui.components.UnlockGalleryDialog
 import com.example.ui.components.UserWarningPopupDialog
-import com.example.ui.components.VideoTokenBalanceChip
 import com.example.ui.components.VoteBalanceChip
 import com.example.ui.components.WarningPopupTarget
 import com.example.ui.screens.AccountRestrictedScreen
@@ -118,9 +114,11 @@ import com.example.ui.theme.SnapVoteTheme
 import com.example.ui.viewmodel.SnapVoteViewModel
 import com.example.ui.viewmodel.UiState
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.storage
+import kotlinx.coroutines.launch
 
 private object Routes {
     const val DISCOVER = "discover"
@@ -159,10 +157,10 @@ fun SnapVoteRoot() {
     val context = LocalContext.current
     val firebaseReady = remember(context) {
         runCatching {
-            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
-                com.google.firebase.FirebaseApp.initializeApp(context)
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
             }
-            com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()
+            FirebaseApp.getApps(context).isNotEmpty()
         }.getOrDefault(false)
     }
 
@@ -172,38 +170,6 @@ fun SnapVoteRoot() {
     }
 
     val auth = remember { Firebase.auth }
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
-    val user = currentUser
-
-    if (user == null) {
-        AuthScreen(onAuthSuccess = {})
-    } else {
-        key(user.uid) {
-            val viewModel: SnapVoteViewModel = viewModel(
-                key = user.uid,
-                factory = viewModelFactory {
-                    initializer {
-                        val app = checkNotNull(this[APPLICATION_KEY])
-                        val databaseId = app.getString(R.string.firestore_database_id)
-                        val db = FirebaseFirestore.getInstance(databaseId)
-                        val storage = runCatching { Firebase.storage }.getOrNull()
-                        val repo = SnapVoteRepository(db, auth, storage)
-                        SnapVoteViewModel(
-                            repository = repo,
-                            currentUserId = user.uid,
-                            currentDisplayName = user.displayName?.takeIf { it.isNotBlank() } ?: "Creator",
-                            currentUserEmail = user.email
-                        )
-                    }
-                }
-            )
-            SnapVoteMainScaffold(viewModel = viewModel)
-        }
-    }
-}
-
-{
-    val auth = Firebase.auth
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val user = currentUser
 
