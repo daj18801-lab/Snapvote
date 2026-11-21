@@ -22,76 +22,34 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Build Debug APK
+      - name: Run Custom Patch Script & Build APK
         run: |
           PROJECT_DIR=$(dirname $(find . -name "build.gradle.kts" -maxdepth 3 | grep -v "/app/" | head -n 1))
           echo "Building in: $PROJECT_DIR"
           cd "$PROJECT_DIR"
 
-          # 1. Create local.properties with SDK path and placeholder API key if missing
+          # 1. Create local.properties
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "GEMINI_API_KEY=placeholder_key" >> local.properties
 
-          # 2. Generate debug.keystore if missing (fixes validateSigningDebug)
+          # 2. Generate debug.keystore if missing and print SHA-1 for Firebase
           if [ ! -f "debug.keystore" ]; then
             keytool -genkey -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          echo "=== YOUR FIREBASE SHA-1 FINGERPRINT ==="
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep "SHA1:"
 
-          # 3. Create valid placeholder google-services.json if missing (fixes default_web_client_id)
-          if [ ! -f "app/google-services.json" ]; then
-            PKG_NAME=$(grep -oE 'applicationId\s*=\s*"[^"]+"' app/build.gradle.kts | cut -d'"' -f2)
-            [ -z "$PKG_NAME" ] && PKG_NAME="com.example.snapvote"
-            cat <<EOF > app/google-services.json
-          {
-            "project_info": {
-              "project_number": "123456789000",
-              "project_id": "snapvote-placeholder",
-              "storage_bucket": "snapvote-placeholder.appspot.com"
-            },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:123456789000:android:abcdef1234567890",
-                  "android_client_info": {
-                    "package_name": "$PKG_NAME"
-                  }
-                },
-                "oauth_client": [
-                  {
-                    "client_id": "123456789000-placeholder.apps.googleusercontent.com",
-                    "client_type": 3
-                  }
-                ],
-                "api_key": [
-                  {
-                    "current_key": "AIzaSyPlaceholderKeyForBuildOnly12345"
-                  }
-                ],
-                "services": {
-                  "appinvite_service": {
-                    "other_platform_oauth_client": [
-                      {
-                        "client_id": "123456789000-placeholder.apps.googleusercontent.com",
-                        "client_type": 3
-                      }
-                    ]
-                  }
-                }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          EOF
+          # 3. Run your custom patch_login.py file
+          if [ -f "patch_login.py" ]; then
+            python3 patch_login.py
           fi
 
-          # 4. Upgrade Gradle wrapper to 9.3.1 (required by AGP 9.1.1)
+          # 4. Upgrade Gradle wrapper to 9.3.1 and compile APK
           gradle wrapper --gradle-version 9.3.1
           chmod +x ./gradlew
-
-          # 5. Compile the debug APK
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
