@@ -156,6 +156,53 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun SnapVoteRoot() {
+    val context = LocalContext.current
+    val firebaseReady = remember(context) {
+        runCatching {
+            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
+                com.google.firebase.FirebaseApp.initializeApp(context)
+            }
+            com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()
+        }.getOrDefault(false)
+    }
+
+    if (!firebaseReady) {
+        AuthScreen(onAuthSuccess = {})
+        return
+    }
+
+    val auth = remember { Firebase.auth }
+    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    val user = currentUser
+
+    if (user == null) {
+        AuthScreen(onAuthSuccess = {})
+    } else {
+        key(user.uid) {
+            val viewModel: SnapVoteViewModel = viewModel(
+                key = user.uid,
+                factory = viewModelFactory {
+                    initializer {
+                        val app = checkNotNull(this[APPLICATION_KEY])
+                        val databaseId = app.getString(R.string.firestore_database_id)
+                        val db = FirebaseFirestore.getInstance(databaseId)
+                        val storage = runCatching { Firebase.storage }.getOrNull()
+                        val repo = SnapVoteRepository(db, auth, storage)
+                        SnapVoteViewModel(
+                            repository = repo,
+                            currentUserId = user.uid,
+                            currentDisplayName = user.displayName?.takeIf { it.isNotBlank() } ?: "Creator",
+                            currentUserEmail = user.email
+                        )
+                    }
+                }
+            )
+            SnapVoteMainScaffold(viewModel = viewModel)
+        }
+    }
+}
+
+{
     val auth = Firebase.auth
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val user = currentUser
