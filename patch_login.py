@@ -1,86 +1,58 @@
 import os
 import re
+import json
+import glob
 
-# 1. Remove foojay-resolver-convention from settings.gradle.kts so Gradle initializes cleanly
-settings_path = "settings.gradle.kts"
-if os.path.exists(settings_path):
-    with open(settings_path, "r", encoding="utf-8") as f:
+# 1. Remove foojay-resolver-convention from settings.gradle.kts
+if os.path.exists("settings.gradle.kts"):
+    with open("settings.gradle.kts", "r", encoding="utf-8") as f:
         s_code = f.read()
-    s_code_new = re.sub(r'.*foojay-resolver-convention.*\n?', '', s_code)
-    if s_code != s_code_new:
-        with open(settings_path, "w", encoding="utf-8") as f:
-            f.write(s_code_new)
-        print("Removed foojay-resolver-convention from settings.gradle.kts")
+    s_new = re.sub(r'.*foojay-resolver-convention.*\n?', '', s_code)
+    if s_code != s_new:
+        with open("settings.gradle.kts", "w", encoding="utf-8") as f:
+            f.write(s_new)
 
-# 2. Point gradle-wrapper.properties directly to Gradle 9.3.1 without running `gradle wrapper`
-wrapper_dir = "gradle/wrapper"
-os.makedirs(wrapper_dir, exist_ok=True)
-wrapper_props = os.path.join(wrapper_dir, "gradle-wrapper.properties")
-with open(wrapper_props, "w", encoding="utf-8") as f:
-    f.write(
-        "distributionBase=GRADLE_USER_HOME\n"
-        "distributionPath=wrapper/dists\n"
-        "distributionUrl=https\\://services.gradle.org/distributions/gradle-9.3.1-bin.zip\n"
-        "zipStoreBase=GRADLE_USER_HOME\n"
-        "zipStorePath=wrapper/dists\n"
-    )
-print("Configured gradle-wrapper.properties for Gradle 9.3.1")
+# 2. Force app/build.gradle.kts to sign debug builds with root debug.keystore
+app_gradle = "app/build.gradle.kts"
+if os.path.exists(app_gradle):
+    with open(app_gradle, "r", encoding="utf-8") as f:
+        g_code = f.read()
+    if 'rootProject.file("debug.keystore")' not in g_code:
+        signing_block = '''
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+'''
+        g_code = re.sub(r'(android\s*\{)', r'\1' + signing_block, g_code, count=1)
+        with open(app_gradle, "w", encoding="utf-8") as f:
+            f.write(g_code)
+        print("Forced app/build.gradle.kts to sign debug APK with root debug.keystore")
 
-# 3. Detect applicationId from app/build.gradle.kts
-gradle_path = "app/build.gradle.kts"
-pkg_name = "com.example.snapvote"
-if os.path.exists(gradle_path):
-    with open(gradle_path, "r", encoding="utf-8") as f:
-        match = re.search(r'applicationId\s*=\s*"([^"]+)"', f.read())
-        if match:
-            pkg_name = match.group(1)
-
-print(f"Package Name (applicationId): {pkg_name}")
-
-# 4. Create temporary placeholder google-services.json only if real one is not uploaded
+# 3. Verify app/google-services.json values and inject exact Web Client ID
+web_client_id = None
 gs_path = "app/google-services.json"
 if os.path.exists(gs_path):
-    print("Real app/google-services.json found! Google Sign-In is ready.")
-else:
-    print("Creating temporary placeholder app/google-services.json so debug.keystore can build...")
-    with open(gs_path, "w", encoding="utf-8") as f:
-        f.write(f"""{{
-  "project_info": {{
-    "project_number": "123456789000",
-    "project_id": "snapvote-3a283",
-    "storage_bucket": "snapvote-placeholder.appspot.com"
-  }},
-  "client": [
-    {{
-      "client_info": {{
-        "mobilesdk_app_id": "1:123456789000:android:abcdef1234567890",
-        "android_client_info": {{
-          "package_name": "{pkg_name}"
-        }}
-      }},
-      "oauth_client": [
-        {{
-          "client_id": "123456789000-placeholder.apps.googleusercontent.com",
-          "client_type": 3
-        }}
-      ],
-      "api_key": [
-        {{
-          "current_key": "AIzaSyPlaceholderKeyForBuildOnly12345"
-        }}
-      ],
-      "services": {{
-        "appinvite_service": {{
-          "other_platform_oauth_client": [
-            {{
-              "client_id": "123456789000-placeholder.apps.googleusercontent.com",
-              "client_type": 3
-            }}
-          ]
-        }}
-      }}
-    }}
-  ],
-  "configuration_version": "1"
-}}
-""")
+    with open(gs_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print("FIREBASE_PROJECT_ID:", data.get("project_info", {}).get("project_id"))
+    for c in data.get("client", []):
+        pkg = c.get("client_info", {}).get("android_client_info", {}).get("package_name")
+        print("FIREBASE_PACKAGE_NAME:", pkg)
+        for oauth in c.get("oauth_client", []):
+            if oauth.get("client_type") == 3:
+                web_client_id = oauth.get("client_id")
+                print("EXACT_WEB_CLIENT_ID:", web_client_id)
+
+if web_client_id:
+    for auth_file in glob.glob("**/GoogleAuthHelper.kt", recursive=True):
+        with open(auth_file, "r", encoding="utf-8") as f:
+            code = f.read()
+        code = re.sub(r'context\.getString\(R\.string\.default_web_client_id\)', f'"{web_client_id}"', code)
+        with open(auth_file, "w", encoding="utf-8") as f:
+            f.write(code)
+        print(f"Injected exact Web Client ID into {auth_file}")
