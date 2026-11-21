@@ -56,31 +56,25 @@ if not os.path.exists(gs_path):
 }}
 """)
 
-# 3. Cleanly inspect & patch GoogleAuthHelper.kt without breaking syntax
+# 3. Cleanly bypass Google Sign-In in GoogleAuthHelper.kt with valid Kotlin types
 auth_files = glob.glob("**/GoogleAuthHelper.kt", recursive=True)
 for auth_file in auth_files:
     with open(auth_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    print("=== ORIGINAL GoogleAuthHelper.kt SIGNATURES ===")
-    for idx, line in enumerate(lines, 1):
-        if "fun " in line or "class " in line or "object " in line:
-            print(f"Line {idx}: {line.strip()}")
-
-    # Replace any line calling getCredential(...) with a clean local guest token
     new_lines = []
     skip_until_close = 0
+
     for line in lines:
+        # Match multi-line credentialManager.getCredential(...) and keep `val result` valid
         if "credentialManager.getCredential(" in line:
             indent = line[:len(line) - len(line.lstrip())]
-            # Check if assigned to a variable (e.g., val result = credentialManager.getCredential(...)
             var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
-            if var_match:
-                var_name = var_match.group(1)
-                # Replace the entire multi-line getCredential call with a dummy object that has .credential or directly bypass
-                new_lines.append(f'{indent}// Guest bypass injected\n')
-            else:
-                new_lines.append(f'{indent}// Guest bypass injected\n')
+            var_name = var_match.group(1) if var_match else "result"
+            new_lines.append(
+                f'{indent}val {var_name} = androidx.credentials.GetCredentialResponse('
+                f'androidx.credentials.CustomCredential("com.google.android.libraries.identity.googleid.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL", android.os.Bundle()))\n'
+            )
             skip_until_close = line.count("(") - line.count(")")
             continue
 
@@ -88,17 +82,19 @@ for auth_file in auth_files:
             skip_until_close += line.count("(") - line.count(")")
             continue
 
-        # Also bypass GoogleIdTokenCredential.createFrom(...)
+        # Replace GoogleIdTokenCredential.createFrom(...) with a real GoogleIdTokenCredential instance
         if "GoogleIdTokenCredential.createFrom(" in line:
             indent = line[:len(line) - len(line.lstrip())]
             var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
-            if var_match:
-                v = var_match.group(1)
-                new_lines.append(f'{indent}val {v} = object {{ val idToken = "guest_token"; val id = "guest@snapvote.app"; val displayName = "Guest User"; val profilePictureUri: android.net.Uri? = null }}\n')
+            var_name = var_match.group(1) if var_match else "googleIdTokenCredential"
+            new_lines.append(
+                f'{indent}val {var_name} = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential('
+                f'"guest@snapvote.app", "guest_id_token", "Guest User", null, null, null, null)\n'
+            )
             continue
 
         new_lines.append(line)
 
     with open(auth_file, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
-    print(f"Safely updated {auth_file}")
+    print(f"Successfully patched {auth_file} with valid Kotlin types")
