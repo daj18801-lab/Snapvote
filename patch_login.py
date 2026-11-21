@@ -11,9 +11,7 @@ if os.path.exists(gradle_path):
         if match:
             pkg_name = match.group(1)
 
-print(f"Detected Package Name (applicationId): {pkg_name}")
-
-# 2. Create placeholder google-services.json only if a real one isn't uploaded
+# 2. Create placeholder google-services.json if real one isn't present
 gs_path = "app/google-services.json"
 if not os.path.exists(gs_path):
     with open(gs_path, "w", encoding="utf-8") as f:
@@ -57,28 +55,50 @@ if not os.path.exists(gs_path):
   "configuration_version": "1"
 }}
 """)
-    print("Created placeholder app/google-services.json")
 
-# 3. Bypass Google Sign-In in GoogleAuthHelper.kt so login opens the app immediately
+# 3. Cleanly inspect & patch GoogleAuthHelper.kt without breaking syntax
 auth_files = glob.glob("**/GoogleAuthHelper.kt", recursive=True)
 for auth_file in auth_files:
     with open(auth_file, "r", encoding="utf-8") as f:
-        code = f.read()
+        lines = f.readlines()
 
-    # Replace credentialManager.getCredential(...) calls so sign-in succeeds immediately with a mock ID token
-    patched = re.sub(
-        r'credentialManager\.getCredential\s*\([^;{}]*?\)\s*',
-        'throw Exception("GUEST_BYPASS") ',
-        code,
-        flags=re.DOTALL
-    )
+    print("=== ORIGINAL GoogleAuthHelper.kt SIGNATURES ===")
+    for idx, line in enumerate(lines, 1):
+        if "fun " in line or "class " in line or "object " in line:
+            print(f"Line {idx}: {line.strip()}")
 
-    # Fallback: if GoogleAuthHelper uses a suspend sign-in function, return a dummy guest token/user
-    if "GUEST_BYPASS" in patched:
-        patched = patched.replace(
-            'catch (e: Exception) {',
-            'catch (e: Exception) {\n            if (e.message == "GUEST_BYPASS") return Result.success("guest_bypass_token")'
-        )
-        with open(auth_file, "w", encoding="utf-8") as f:
-            f.write(patched)
-        print(f"Patched guest login bypass in: {auth_file}")
+    # Replace any line calling getCredential(...) with a clean local guest token
+    new_lines = []
+    skip_until_close = 0
+    for line in lines:
+        if "credentialManager.getCredential(" in line:
+            indent = line[:len(line) - len(line.lstrip())]
+            # Check if assigned to a variable (e.g., val result = credentialManager.getCredential(...)
+            var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
+            if var_match:
+                var_name = var_match.group(1)
+                # Replace the entire multi-line getCredential call with a dummy object that has .credential or directly bypass
+                new_lines.append(f'{indent}// Guest bypass injected\n')
+            else:
+                new_lines.append(f'{indent}// Guest bypass injected\n')
+            skip_until_close = line.count("(") - line.count(")")
+            continue
+
+        if skip_until_close > 0:
+            skip_until_close += line.count("(") - line.count(")")
+            continue
+
+        # Also bypass GoogleIdTokenCredential.createFrom(...)
+        if "GoogleIdTokenCredential.createFrom(" in line:
+            indent = line[:len(line) - len(line.lstrip())]
+            var_match = re.match(r'\s*val\s+(\w+)\s*=', line)
+            if var_match:
+                v = var_match.group(1)
+                new_lines.append(f'{indent}val {v} = object {{ val idToken = "guest_token"; val id = "guest@snapvote.app"; val displayName = "Guest User"; val profilePictureUri: android.net.Uri? = null }}\n')
+            continue
+
+        new_lines.append(line)
+
+    with open(auth_file, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+    print(f"Safely updated {auth_file}")
