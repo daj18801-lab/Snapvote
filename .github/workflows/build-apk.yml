@@ -45,9 +45,14 @@ jobs:
             python3 patch_login.py
           fi
 
-          gradle wrapper --gradle-version 9.3.1
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle wrapper --gradle-version 9.3.1
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v6
@@ -56,6 +61,7 @@ jobs:
           path: "**/app/build/outputs/apk/debug/*.apk"
 
       - name: Upload Debug Keystore
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: debug-keystore-file
