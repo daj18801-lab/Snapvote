@@ -25,29 +25,26 @@ jobs:
       - name: Run Custom Patch Script & Build APK
         run: |
           PROJECT_DIR=$(dirname $(find . -name "build.gradle.kts" -maxdepth 3 | grep -v "/app/" | head -n 1))
-          echo "Building in: $PROJECT_DIR"
           cd "$PROJECT_DIR"
 
-          # 1. Create local.properties
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "GEMINI_API_KEY=placeholder_key" >> local.properties
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> local.properties
 
-          # 2. Generate debug.keystore if missing and print SHA-1 for Firebase
           if [ ! -f "debug.keystore" ]; then
             keytool -genkey -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
-          echo "=== YOUR FIREBASE SHA-1 FINGERPRINT ==="
+
+          echo "=== COPY THESE TWO VALUES FOR FIREBASE ==="
+          grep 'applicationId' app/build.gradle.kts
           keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep "SHA1:"
 
-          # 3. Run your custom patch_login.py file
           if [ -f "patch_login.py" ]; then
             python3 patch_login.py
           fi
 
-          # 4. Upgrade Gradle wrapper to 9.3.1 and compile APK
           gradle wrapper --gradle-version 9.3.1
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
@@ -57,3 +54,9 @@ jobs:
         with:
           name: app-debug-apk
           path: "**/app/build/outputs/apk/debug/*.apk"
+
+      - name: Upload Debug Keystore
+        uses: actions/upload-artifact@v6
+        with:
+          name: debug-keystore-file
+          path: "**/debug.keystore"
