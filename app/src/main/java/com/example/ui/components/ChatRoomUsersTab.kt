@@ -154,14 +154,14 @@ fun ChatRoomUsersTabContent(
                         MaterialTheme.colorScheme.outlineVariant
                     }
                 ),
-                shape = MaterialTheme.shapes.large,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("users_tab_live_mic_card")
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -174,67 +174,66 @@ fun ChatRoomUsersTabContent(
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            },
+                            modifier = Modifier.size(18.dp)
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (activeSpeakers.isNotEmpty()) {
                                     "Live on Mic (${activeSpeakers.size})"
                                 } else {
-                                    "Live Mic Stage"
+                                    "Live Mic Stage • Mic idle"
                                 },
-                                style = MaterialTheme.typography.titleSmall,
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = monitorMember?.let {
                                     val formatted = formatDisplayNameWithRole(it.displayName, it.role)
-                                    "Monitor: $formatted • Tap any user below"
-                                } ?: "Tap any user's name to add, DM, or view profile",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    "Monitor: $formatted • Tap a user below"
+                                } ?: "Tap any user below to add, DM, or view profile",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    if (activeSpeakers.isEmpty()) {
-                        Text(
-                            text = "Nobody is holding the mic right now.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
+                    if (activeSpeakers.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             activeSpeakers.forEach { speaker ->
                                 Surface(
                                     color = MaterialTheme.colorScheme.primaryContainer,
                                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-                                    shape = RoundedCornerShape(20.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier
                                         .heightIn(min = 48.dp)
                                         .clickable { onUserClick(speaker) }
                                         .testTag("live_mic_speaker_${speaker.userId}")
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Mic,
                                             contentDescription = "Using microphone",
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(14.dp)
                                         )
                                         Text(
                                             text = formatDisplayNameWithRole(speaker.displayName, speaker.role),
-                                            style = MaterialTheme.typography.labelMedium,
+                                            style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = roleBadgeForegroundColor(speaker.role)
                                                 ?: MaterialTheme.colorScheme.onPrimaryContainer,

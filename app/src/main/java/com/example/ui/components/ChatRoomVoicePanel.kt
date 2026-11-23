@@ -113,21 +113,24 @@ fun ChatRoomVoiceStageBanner(
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 1.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("room_voice_stage_banner")
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(start = 10.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Surface(
                         color = if (isCurrentUserMonitor) {
@@ -135,22 +138,21 @@ fun ChatRoomVoiceStageBanner(
                         } else {
                             MaterialTheme.colorScheme.secondaryContainer
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         modifier = Modifier
-                            .weight(1f, fill = false)
                             .clickable(onClick = onOpenMembersSheet)
                             .testTag("room_monitor_badge")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Shield,
                                 contentDescription = "Room Monitor",
                                 tint = monitorColor,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
                                 text = if (isCurrentUserMonitor) {
@@ -158,7 +160,7 @@ fun ChatRoomVoiceStageBanner(
                                 } else {
                                     "Monitor: $monitorName"
                                 },
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCurrentUserMonitor) {
                                     MaterialTheme.colorScheme.onPrimaryContainer
@@ -171,114 +173,103 @@ fun ChatRoomVoiceStageBanner(
                         }
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    IconButton(
-                        onClick = onToggleLocalListenMute,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("room_listen_toggle")
-                    ) {
-                        Icon(
-                            imageVector = if (isRoomAudioMutedLocally) {
-                                Icons.AutoMirrored.Rounded.VolumeOff
-                            } else {
-                                Icons.AutoMirrored.Rounded.VolumeUp
-                            },
-                            contentDescription = if (isRoomAudioMutedLocally) {
-                                "Unmute room voice audio"
-                            } else {
-                                "Mute room voice audio"
-                            },
-                            tint = if (isRoomAudioMutedLocally) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
+                    activeSpeakers.forEach { speaker ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("room_speaker_chip_${speaker.userId}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mic,
+                                    contentDescription = "Speaking",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = if (speaker.userId == currentUserId) {
+                                        "You (Live)"
+                                    } else {
+                                        speaker.displayName
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1
+                                )
                             }
-                        )
+                        }
+                    }
+
+                    if (raisedHands.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .clickable(onClick = onOpenMembersSheet)
+                                .testTag("room_raised_hands_summary")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PanTool,
+                                    contentDescription = "Raised hands",
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                val previewNames = raisedHands.take(2).joinToString(", ") {
+                                    if (it.userId == currentUserId) "You" else it.displayName
+                                }
+                                val extraCount = (raisedHands.size - 2).coerceAtLeast(0)
+                                Text(
+                                    text = if (extraCount > 0) {
+                                        "${raisedHands.size}: $previewNames +$extraCount"
+                                    } else {
+                                        "${raisedHands.size}: $previewNames"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    maxLines = 1
+                                )
+                            }
+                        }
                     }
                 }
 
-                if (activeSpeakers.isNotEmpty() || raisedHands.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        activeSpeakers.forEach { speaker ->
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                                modifier = Modifier.testTag("room_speaker_chip_${speaker.userId}")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Mic,
-                                        contentDescription = "Speaking",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = if (speaker.userId == currentUserId) {
-                                            "You (Talking)"
-                                        } else {
-                                            speaker.displayName
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-
-                        if (raisedHands.isNotEmpty()) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.tertiaryContainer,
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
-                                modifier = Modifier
-                                    .clickable(onClick = onOpenMembersSheet)
-                                    .testTag("room_raised_hands_summary")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.PanTool,
-                                        contentDescription = "Raised hands",
-                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    val previewNames = raisedHands.take(2).joinToString(", ") {
-                                        if (it.userId == currentUserId) "You" else it.displayName
-                                    }
-                                    val extraCount = (raisedHands.size - 2).coerceAtLeast(0)
-                                    Text(
-                                        text = if (extraCount > 0) {
-                                            "${raisedHands.size} Hand(s): $previewNames +$extraCount"
-                                        } else {
-                                            "${raisedHands.size} Hand(s): $previewNames"
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
+                IconButton(
+                    onClick = onToggleLocalListenMute,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("room_listen_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (isRoomAudioMutedLocally) {
+                            Icons.AutoMirrored.Rounded.VolumeOff
+                        } else {
+                            Icons.AutoMirrored.Rounded.VolumeUp
+                        },
+                        contentDescription = if (isRoomAudioMutedLocally) {
+                            "Unmute room voice audio"
+                        } else {
+                            "Mute room voice audio"
+                        },
+                        tint = if (isRoomAudioMutedLocally) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }
@@ -291,20 +282,22 @@ fun ChatRoomVoiceStageBanner(
                     .testTag("room_voice_muted_banner")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.MicOff,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = "You are muted — you cannot use the mic or send chat messages.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        text = "You are muted — mic and chat are disabled.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
